@@ -1463,6 +1463,15 @@ void ExecutableLayoutLookupOp::getAsmResultNames(
 }
 
 //===----------------------------------------------------------------------===//
+// hal.semaphore.create
+//===----------------------------------------------------------------------===//
+
+void SemaphoreCreateOp::getAsmResultNames(
+    function_ref<void(Value, StringRef)> setNameFn) {
+  setNameFn(result(), "semaphore");
+}
+
+//===----------------------------------------------------------------------===//
 // TableGen definitions (intentionally last)
 //===----------------------------------------------------------------------===//
 
