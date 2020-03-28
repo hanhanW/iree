@@ -36,6 +36,7 @@ class DynamicLibraryWin : public DynamicLibrary {
     IREE_TRACE_SCOPE0("DynamicLibraryWin::Load");
 
     for (int i = 0; i < search_file_names.size(); ++i) {
+      LOG(INFO) << "trying " << search_file_names[i];
       HMODULE library = ::LoadLibraryA(search_file_names[i]);
       if (library) {
         return absl::WrapUnique(

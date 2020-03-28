@@ -39,6 +39,7 @@ class DynamicLibraryPosix : public DynamicLibrary {
     IREE_TRACE_SCOPE0("DynamicLibraryPosix::Load");
 
     for (int i = 0; i < search_file_names.size(); ++i) {
+      LOG(INFO) << "trying " << search_file_names[i];
       void* library = ::dlopen(search_file_names[i], RTLD_LAZY | RTLD_LOCAL);
       if (library) {
         return absl::WrapUnique(
