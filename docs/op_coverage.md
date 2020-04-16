@@ -1,60 +1,53 @@
 # Op Coverage
+There are four backend [targets](https://github.com/google/iree/tree/master/iree/compiler/Dialect/HAL/Target) in IREE:
 
-There are four backend
-[targets](https://github.com/google/iree/tree/master/iree/compiler/Dialect/HAL/Target)
-in IREE:
+- vmla
+- llvm-ir
+- vulkan (direct path)
+- vulkan (structured ops path)
 
--   vmla
--   llvm-ir
--   vulkan (direct path)
--   vulkan (structured ops path)
-
-IREE has two path for Vulkan backend, one is using direct path (XLA -> SPIR-V),
-and another is using structured ops path (XLA -> Linalg -> ... -> SPIR-V).
+(**Note**: IREE currently has two compilation paths for Vulkan, shown as above.
+The direct path lowers XLA HLOs to SPIR-V in one step; the structured ops path
+goes multiple steps in a progressive way. The plan is to deprecate the direct
+path soon.)
 
 The table shows the supported XLA HLO ops on each backend.
 
-| op                   | vmla | vulkan (direct | vulkan (structured | llvm-ir |
-:                      :      : path)          : ops path)          :         :
-| :------------------: | :--: | :------------: | :----------------: | :-----: |
-| abs                  | ✓    | ✓              | ✓                  | ✓       |
-| add                  | ✓    | ✓              | ✓                  | ✓       |
-| batch_norm_inference | ✓    | ✗              | ✓                  | ✓       |
-| broadcast            | ✓    | ✓              | ✗                  | ✗       |
-| broadcast_in_dim     | ✓    | ✓              | ✓                  | ✓       |
-| compare              | ✓    | ✓              | ✗                  | ✓       |
-| concatenate          | ✓    | ✓              | ✗                  | ✗       |
-| constant             | ✓    | ✓              | ✓                  | ✓       |
-| conv                 | ✓    | ✗              | ✗                  | ✓       |
-| convert_int          | ✓    | ✓              | ✗                  | ✗       |
-| cos                  | ✓    | ✓              | ✓                  | ✓       |
-| dot                  | ✓    | ✓              | ✗                  | ✓       |
-| dot_general          | ✓    | ✗              | ✗                  | ✗       |
-| exp                  | ✓    | ✓              | ✓                  | ✓       |
-| floor                | ✓    | ✓              | ✗                  | ✗       |
-| gather               | ✓    | ✓              | ✗                  | ✗       |
-| gather_concat        | ✓    | ✓              | ✗                  | ✗       |
-| gemm                 | ✓    | ✓              | ✓                  | ✓       |
-| gemm_large           | ✓    | ✓              | ✓                  | ✓       |
-| log                  | ✓    | ✓              | ✓                  | ✓       |
-| max_float            | ✓    | ✓              | ✓                  | ✓       |
-| max_int              | ✓    | ✓              | ✓                  | ✓       |
-| min_float            | ✓    | ✓              | ✓                  | ✓       |
-| min_int              | ✓    | ✓              | ✓                  | ✓       |
-| multiply             | ✓    | ✓              | ✗                  | ✓       |
-| negate               | ✓    | ✗              | ✗                  | ✓       |
-| pad                  | ✓    | ✓              | ✗                  | ✗       |
-| reduce_float         | ✓    | ✓              | ✗                  | ✓       |
-| reduce_int           | ✓    | ✓              | ✗                  | ✓       |
-| reduce_window        | ✓    | ✗              | ✗                  | ✓       |
-| rem                  | ✓    | ✓              | ✓                  | ✓       |
-| reshape              | ✓    | ✓              | ✗                  | ✓       |
-| reshape_adddims      | ✓    | ✓              | ✓                  | ✓       |
-| reshape_dropdims     | ✓    | ✓              | ✓                  | ✓       |
-| reverse              | ✓    | ✓              | ✗                  | ✗       |
-| rsqrt                | ✓    | ✓              | ✓                  | ✓       |
-| select               | ✓    | ✓              | ✓                  | ✓       |
-| sin                  | ✓    | ✓              | ✗                  | ✗       |
-| slice                | ✓    | ✓              | ✗                  | ✗       |
-| sqrt                 | ✓    | ✓              | ✓                  | ✓       |
-| while                | ✓    | ✓              | ✗                  | ✓       |
+op | vmla | vulkan (direct path) | vulkan (structured ops path) | llvm-ir
+:-: | :-: | :-: | :-: | :-:
+abs | ✓ | ✓ | ✓ | ✓
+add | ✓ | ✓ | ✓ | ✓
+batch_norm_inference | ✓ | ✗ | ✓ | ✓
+broadcast | ✓ | ✓ | ✗ | ✗
+broadcast_in_dim | ✓ | ✓ | ✓ | ✓
+compare | ✓ | ✓ | ✗ | ✓
+concatenate | ✓ | ✓ | ✗ | ✗
+constant | ✓ | ✓ | ✓ | ✓
+convert | ✓ | ✓ | ✗ | ✗
+convolution | ✓ | ✗ | ✗ | ✓
+cosine | ✓ | ✓ | ✓ | ✓
+dot | ✓ | ✓ | ✗ | ✓
+dot_general | ✓ | ✗ | ✗ | ✗
+exponential | ✓ | ✓ | ✓ | ✓
+floor | ✓ | ✓ | ✗ | ✗
+gather | ✓ | ✓ | ✗ | ✗
+gather_concat | ✓ | ✓ | ✗ | ✗
+gemm | ✓ | ✓ | ✓ | ✓
+gemm_large | ✓ | ✓ | ✓ | ✓
+log | ✓ | ✓ | ✓ | ✓
+maximum | ✓ | ✓ | ✓ | ✓
+minimum | ✓ | ✓ | ✓ | ✓
+multiply | ✓ | ✓ | ✗ | ✓
+negate | ✓ | ✗ | ✗ | ✓
+pad | ✓ | ✓ | ✗ | ✗
+reduce | ✓ | ✓ | ✗ | ✓
+reduce_window | ✓ | ✗ | ✗ | ✓
+remainder | ✓ | ✓ | ✓ | ✓
+reshape | ✓ | ✓ | ✗ | ✓
+reverse | ✓ | ✓ | ✗ | ✗
+rsqrt | ✓ | ✓ | ✓ | ✓
+select | ✓ | ✓ | ✓ | ✓
+sine | ✓ | ✓ | ✗ | ✗
+slice | ✓ | ✓ | ✗ | ✗
+sqrt | ✓ | ✓ | ✓ | ✓
+while | ✓ | ✓ | ✗ | ✓
