@@ -1,4 +1,12 @@
+---
+layout: default
+permalink: OpCoverage
+title: XLA HLO Operation Coverage
+nav_order: 6
+---
+
 # Op Coverage
+{: .no_toc }
 There are four backend [targets](https://github.com/google/iree/tree/master/iree/compiler/Dialect/HAL/Target) in IREE:
 
 - vmla
