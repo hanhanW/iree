@@ -56,6 +56,7 @@ DOC_TITLE_DICT = {
     'getting_started_windows_vulkan.md': 'Windows with Vulkan',
     'roadmap.md': 'Short-term Focus Areas',
     'roadmap_design.md': 'Long-term Design Roadmap',
+    'op_coverage.md': 'XLA HLO Operation Coverage',
 }
 
 # A dictionary containing source file to permanent link mappings.
@@ -75,6 +76,7 @@ PERMALINK_DICT = {
     'developer_overview.md': 'DeveloperOverview',
     'roadmap.md': 'FocusAreas',
     'roadmap_design.md': 'DesignRoadmap',
+    'op_coverage.md': 'OpCoverage',
 }
 
 # A dictionary containing source file to navigation order mappings.
@@ -88,6 +90,7 @@ NAVI_ORDER_DICT = {
     'developer_overview.md': 3,
     'roadmap_design.md': 4,
     'roadmap.md': 5,
+    'op_coverage.md': 6,
 }
 
 # A dictionary containing source directory to section tile mappings.
