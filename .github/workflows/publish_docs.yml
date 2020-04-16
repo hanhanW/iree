@@ -41,6 +41,7 @@ jobs:
           ./build_tools/cmake/build_docs.sh
           # Patch the MarkDown files with front matter for rendering
           ./scripts/prepare_doc_publication.py ${IREE_DOC_BUILD_DIR}/doc
+          ./scripts/update_op_coverage.py ${IREE_DOC_BUILD_DIR}
       - name: Updating gh-pages branch
         run: |
           git checkout -f gh-pages
