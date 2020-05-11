@@ -32,6 +32,45 @@ A tensor of string types.
 
 ## Operation definition
 
+### `strings.concat` (IREE::Strings::ConcatOp)
+
+
+  concatenates the strings in the tensor along the last dimension
+  
+
+Concatenates the strings in the tensor along the last dimension.
+
+#### Operands:
+
+| Operand | Description |
+| :-----: | ----------- |
+`value` | string_tensor
+
+#### Results:
+
+| Result | Description |
+| :----: | ----------- |
+`result` | string_tensor
+
+### `strings.gather` (IREE::Strings::GatherOp)
+
+gathers all the strings from a Tensor by id
+
+Gathers all the strings from a Tensor by ID.
+
+#### Operands:
+
+| Operand | Description |
+| :-----: | ----------- |
+`dict` | string_tensor
+`ids` | buffer_view
+
+#### Results:
+
+| Result | Description |
+| :----: | ----------- |
+`result` | string_tensor
+
 ### `strings.i32_to_string` (IREE::Strings::I32ToStringOp)
 
 converts an i32 to a string

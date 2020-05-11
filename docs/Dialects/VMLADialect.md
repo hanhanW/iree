@@ -38,6 +38,15 @@ Binding and parameter interface (derived from `hal.interface`).
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.conv` $input`(`$input_shape `:` type($input_shape)`)` `:` $input_type`,`
+              $filter`(`$filter_shape `:` type($filter_shape)`)` `:` $filter_type`,`
+              `out` $dst`(`$dst_shape `:` type($dst_shape)`)` `:` $dst_type attr-dict
+```
+
+
 
 #### Attributes:
 
@@ -68,6 +77,13 @@ Binding and parameter interface (derived from `hal.interface`).
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.abs` $src`,` `out` $dst attr-dict `:` $element_type
+```
+
+
 
 #### Attributes:
 
@@ -85,6 +101,13 @@ Binding and parameter interface (derived from `hal.interface`).
 
 ### `vmla.add` (IREE::VMLA::AddOp)
 
+
+
+Syntax:
+
+```
+operation ::= `vmla.add` $lhs`,` $rhs`,` `out` $dst attr-dict `:` $element_type
+```
 
 
 
@@ -107,6 +130,13 @@ Binding and parameter interface (derived from `hal.interface`).
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.and` $lhs`,` $rhs`,` `out` $dst attr-dict `:` $element_type
+```
+
+
 
 #### Attributes:
 
@@ -127,6 +157,13 @@ Binding and parameter interface (derived from `hal.interface`).
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.atan2` $lhs`,` $rhs`,` `out` $dst attr-dict `:` $element_type
+```
+
+
 
 #### Attributes:
 
@@ -145,6 +182,15 @@ Binding and parameter interface (derived from `hal.interface`).
 
 ### `vmla.batch.matmul` (IREE::VMLA::BatchMatMulOp)
 
+
+
+Syntax:
+
+```
+operation ::= `vmla.batch.matmul` $lhs`(`$lhs_shape `:` type($lhs_shape)`)` `:` $lhs_type`,`
+              $rhs`(`$rhs_shape `:` type($rhs_shape)`)` `:` $rhs_type`,`
+              `out` $dst`(`$dst_shape `:` type($dst_shape)`)` `:` $dst_type attr-dict
+```
 
 
 
@@ -171,13 +217,21 @@ Binding and parameter interface (derived from `hal.interface`).
 
 Tensor-level pseudo-op of VMLA::BatchMatMulOp.
 
+Syntax:
+
+```
+operation ::= `vmla.batch.matmul.pseudo` $lhs`,` $rhs attr-dict `:`
+              `(`type($lhs)`,` type($rhs)`)` `->` type($dst)
+```
+
+
 This is a tensor-level version of VMLA::BatchMatMulOp, to facilitate
 the lowering process.
 
 All operands are rank-3 with the following dimension structure:
 - lhs = [B, FLHS, C]
 - rhs = [B, FRHS, C]
-- dst = [B, FLHS, FRHS]
+- dst = [B, FRHS, FLHS]
 Where:
 - B = batch dimension
 - C = contracting dimension
@@ -213,6 +267,14 @@ We insert the relevant transposes as needed in the compiler.
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.broadcast` $src`(`$src_shape `:` type($src_shape)`)``,`
+              `out` $dst`(`$dst_shape `:` type($dst_shape)`)` attr-dict `:` $element_type
+```
+
+
 
 #### Attributes:
 
@@ -233,6 +295,13 @@ We insert the relevant transposes as needed in the compiler.
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.buffer.alloc` `byte_length` `=` $byte_length attr-dict `:` type($result)
+```
+
+
 
 #### Operands:
 
@@ -248,6 +317,13 @@ We insert the relevant transposes as needed in the compiler.
 
 ### `vmla.buffer.byte_length` (IREE::VMLA::BufferByteLengthOp)
 
+
+
+Syntax:
+
+```
+operation ::= `vmla.buffer.byte_length` $value attr-dict `:` type($result)
+```
 
 
 
@@ -267,6 +343,13 @@ We insert the relevant transposes as needed in the compiler.
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.buffer.clone` $src attr-dict `:` type($result)
+```
+
+
 
 #### Operands:
 
@@ -282,6 +365,13 @@ We insert the relevant transposes as needed in the compiler.
 
 ### `vmla.buffer.const` (IREE::VMLA::BufferConstOp)
 
+
+
+Syntax:
+
+```
+operation ::= `vmla.buffer.const` $value attr-dict `:` type($value) `->` type($result)
+```
 
 
 
@@ -301,6 +391,15 @@ We insert the relevant transposes as needed in the compiler.
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.buffer.copy` $src`[`$src_byte_offset`]``,`
+              `out` $dst`[`$dst_byte_offset`]``,` `byte_length` `=` $byte_length
+              attr-dict
+```
+
+
 
 #### Operands:
 
@@ -316,6 +415,13 @@ We insert the relevant transposes as needed in the compiler.
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.buffer.fill` $value`,` `out` $dst attr-dict
+```
+
+
 
 #### Operands:
 
@@ -326,6 +432,13 @@ We insert the relevant transposes as needed in the compiler.
 
 ### `vmla.buffer.load.i32` (IREE::VMLA::BufferLoadI32Op)
 
+
+
+Syntax:
+
+```
+operation ::= `vmla.buffer.load.i32` $src`[`$byte_offset`]` attr-dict `:` type($result)
+```
 
 
 
@@ -344,6 +457,14 @@ We insert the relevant transposes as needed in the compiler.
 
 ### `vmla.buffer.view` (IREE::VMLA::BufferViewOp)
 
+
+
+Syntax:
+
+```
+operation ::= `vmla.buffer.view` $src`[`$byte_offset`]``,` `byte_length` `=` $byte_length
+              attr-dict `:` type($result)
+```
 
 
 
@@ -365,6 +486,13 @@ We insert the relevant transposes as needed in the compiler.
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.ceil` $src`,` `out` $dst attr-dict `:` $element_type
+```
+
+
 
 #### Attributes:
 
@@ -382,6 +510,13 @@ We insert the relevant transposes as needed in the compiler.
 
 ### `vmla.clamp` (IREE::VMLA::ClampOp)
 
+
+
+Syntax:
+
+```
+operation ::= `vmla.clamp` $a`,` $b`,` $c`,` `out` $dst attr-dict `:` $element_type
+```
 
 
 
@@ -405,6 +540,13 @@ We insert the relevant transposes as needed in the compiler.
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.cmp` $predicate`,` $lhs`,` $rhs`,` `out` $dst attr-dict `:` $element_type
+```
+
+
 
 #### Attributes:
 
@@ -425,6 +567,13 @@ We insert the relevant transposes as needed in the compiler.
 
 constant buffer declaration
 
+Syntax:
+
+```
+operation ::= `vmla.constant` attr-dict $value `->` type($result)
+```
+
+
 A pseudo-op used to represent a buffer with constant contents. This is later
 expanded into VM ops and the vmla.buffer.const op.
 
@@ -444,6 +593,13 @@ expanded into VM ops and the vmla.buffer.const op.
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.convert` $src`,` `out` $dst attr-dict `:` $src_type `->` $dst_type
+```
+
+
 
 #### Attributes:
 
@@ -461,6 +617,17 @@ expanded into VM ops and the vmla.buffer.const op.
 
 ### `vmla.copy` (IREE::VMLA::CopyOp)
 
+
+
+Syntax:
+
+```
+operation ::= `vmla.copy` $src`(`$src_shape `:` type($src_shape)`)``,`
+              (`src_indices` `=` `[` $src_indices^ `]``,`)?
+              `out` $dst`(`$dst_shape `:` type($dst_shape)`)`
+              (`,` `dst_indices` `=` `[` $dst_indices^ `]`)?
+              (`,` `lengths` `=` `[` $lengths^ `]`)? attr-dict `:` $element_type
+```
 
 
 
@@ -486,6 +653,13 @@ expanded into VM ops and the vmla.buffer.const op.
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.cos` $src`,` `out` $dst attr-dict `:` $element_type
+```
+
+
 
 #### Attributes:
 
@@ -503,6 +677,13 @@ expanded into VM ops and the vmla.buffer.const op.
 
 ### `vmla.div` (IREE::VMLA::DivOp)
 
+
+
+Syntax:
+
+```
+operation ::= `vmla.div` $lhs`,` $rhs`,` `out` $dst attr-dict `:` $element_type
+```
 
 
 
@@ -525,6 +706,13 @@ expanded into VM ops and the vmla.buffer.const op.
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.exp` $src`,` `out` $dst attr-dict `:` $element_type
+```
+
+
 
 #### Attributes:
 
@@ -544,6 +732,13 @@ expanded into VM ops and the vmla.buffer.const op.
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.floor` $src`,` `out` $dst attr-dict `:` $element_type
+```
+
+
 
 #### Attributes:
 
@@ -559,8 +754,48 @@ expanded into VM ops and the vmla.buffer.const op.
 `src` | buffer
 `dst` | buffer
 
+### `vmla.gather` (IREE::VMLA::GatherOp)
+
+
+
+Syntax:
+
+```
+operation ::= `vmla.gather` $src`(`$src_shape `:` type($src_shape)`)``,`
+              $indices`(`$indices_shape `:` type($indices_shape)`)``,`
+              `out` $dst`(`$dst_shape `:` type($dst_shape)`)` attr-dict `:` $element_type
+```
+
+
+
+#### Attributes:
+
+| Attribute | MLIR Type | Description |
+| :-------: | :-------: | ----------- |
+`dim` | IntegerAttr | 64-bit signless integer attribute
+`batch_dims` | IntegerAttr | 64-bit signless integer attribute
+`element_type` | TypeAttr | any type attribute
+
+#### Operands:
+
+| Operand | Description |
+| :-----: | ----------- |
+`src` | buffer
+`src_shape` | Ranked shape type
+`indices` | buffer
+`indices_shape` | Ranked shape type
+`dst` | buffer
+`dst_shape` | Ranked shape type
+
 ### `vmla.interface.binding` (IREE::VMLA::InterfaceBindingOp)
 
+
+
+Syntax:
+
+```
+operation ::= `vmla.interface.binding` $interface attr-dict `:` type($result)
+```
 
 
 
@@ -587,6 +822,13 @@ expanded into VM ops and the vmla.buffer.const op.
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.interface.const` $interface attr-dict `:` type($result)
+```
+
+
 
 #### Attributes:
 
@@ -610,6 +852,13 @@ expanded into VM ops and the vmla.buffer.const op.
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.log` $src`,` `out` $dst attr-dict `:` $element_type
+```
+
+
 
 #### Attributes:
 
@@ -627,6 +876,13 @@ expanded into VM ops and the vmla.buffer.const op.
 
 ### `vmla.max` (IREE::VMLA::MaxOp)
 
+
+
+Syntax:
+
+```
+operation ::= `vmla.max` $lhs`,` $rhs`,` `out` $dst attr-dict `:` $element_type
+```
 
 
 
@@ -649,6 +905,13 @@ expanded into VM ops and the vmla.buffer.const op.
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.min` $lhs`,` $rhs`,` `out` $dst attr-dict `:` $element_type
+```
+
+
 
 #### Attributes:
 
@@ -667,6 +930,13 @@ expanded into VM ops and the vmla.buffer.const op.
 
 ### `vmla.mul` (IREE::VMLA::MulOp)
 
+
+
+Syntax:
+
+```
+operation ::= `vmla.mul` $lhs`,` $rhs`,` `out` $dst attr-dict `:` $element_type
+```
 
 
 
@@ -689,6 +959,13 @@ expanded into VM ops and the vmla.buffer.const op.
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.neg` $src`,` `out` $dst attr-dict `:` $element_type
+```
+
+
 
 #### Attributes:
 
@@ -706,6 +983,13 @@ expanded into VM ops and the vmla.buffer.const op.
 
 ### `vmla.not` (IREE::VMLA::NotOp)
 
+
+
+Syntax:
+
+```
+operation ::= `vmla.not` $src`,` `out` $dst attr-dict `:` $element_type
+```
 
 
 
@@ -727,6 +1011,13 @@ expanded into VM ops and the vmla.buffer.const op.
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.or` $lhs`,` $rhs`,` `out` $dst attr-dict `:` $element_type
+```
+
+
 
 #### Attributes:
 
@@ -745,6 +1036,15 @@ expanded into VM ops and the vmla.buffer.const op.
 
 ### `vmla.pad` (IREE::VMLA::PadOp)
 
+
+
+Syntax:
+
+```
+operation ::= `vmla.pad` $src`(`$src_shape `:` type($src_shape)`)``,`
+              $value`(`$value_shape `:` type($value_shape)`)``,`
+              `out` $dst`(`$dst_shape `:` type($dst_shape)`)` attr-dict `:` $element_type
+```
 
 
 
@@ -772,6 +1072,15 @@ expanded into VM ops and the vmla.buffer.const op.
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.pooling.max` $src`(`$src_shape `:` type($src_shape)`)``,`
+              $init`(`$init_shape `:` type($init_shape)`)``,`
+              `out` $dst`(`$dst_shape `:` type($dst_shape)`)` attr-dict `:` $element_type
+```
+
+
 
 #### Attributes:
 
@@ -795,6 +1104,15 @@ expanded into VM ops and the vmla.buffer.const op.
 
 ### `vmla.pooling.min` (IREE::VMLA::PoolingMinOp)
 
+
+
+Syntax:
+
+```
+operation ::= `vmla.pooling.min` $src`(`$src_shape `:` type($src_shape)`)``,`
+              $init`(`$init_shape `:` type($init_shape)`)``,`
+              `out` $dst`(`$dst_shape `:` type($dst_shape)`)` attr-dict `:` $element_type
+```
 
 
 
@@ -822,6 +1140,15 @@ expanded into VM ops and the vmla.buffer.const op.
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.pooling.sum` $src`(`$src_shape `:` type($src_shape)`)``,`
+              $init`(`$init_shape `:` type($init_shape)`)``,`
+              `out` $dst`(`$dst_shape `:` type($dst_shape)`)` attr-dict `:` $element_type
+```
+
+
 
 #### Attributes:
 
@@ -847,6 +1174,13 @@ expanded into VM ops and the vmla.buffer.const op.
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.pow` $lhs`,` $rhs`,` `out` $dst attr-dict `:` $element_type
+```
+
+
 
 #### Attributes:
 
@@ -865,6 +1199,15 @@ expanded into VM ops and the vmla.buffer.const op.
 
 ### `vmla.reduce.max` (IREE::VMLA::ReduceMaxOp)
 
+
+
+Syntax:
+
+```
+operation ::= `vmla.reduce.max` $src`(`$src_shape `:` type($src_shape)`)``,`
+              $init`(`$init_shape `:` type($init_shape)`)``,`
+              `out` $dst`(`$dst_shape `:` type($dst_shape)`)` attr-dict `:` $element_type
+```
 
 
 
@@ -890,6 +1233,15 @@ expanded into VM ops and the vmla.buffer.const op.
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.reduce.min` $src`(`$src_shape `:` type($src_shape)`)``,`
+              $init`(`$init_shape `:` type($init_shape)`)``,`
+              `out` $dst`(`$dst_shape `:` type($dst_shape)`)` attr-dict `:` $element_type
+```
+
+
 
 #### Attributes:
 
@@ -911,6 +1263,15 @@ expanded into VM ops and the vmla.buffer.const op.
 
 ### `vmla.reduce.sum` (IREE::VMLA::ReduceSumOp)
 
+
+
+Syntax:
+
+```
+operation ::= `vmla.reduce.sum` $src`(`$src_shape `:` type($src_shape)`)``,`
+              $init`(`$init_shape `:` type($init_shape)`)``,`
+              `out` $dst`(`$dst_shape `:` type($dst_shape)`)` attr-dict `:` $element_type
+```
 
 
 
@@ -936,6 +1297,13 @@ expanded into VM ops and the vmla.buffer.const op.
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.rem` $lhs`,` $rhs`,` `out` $dst attr-dict `:` $element_type
+```
+
+
 
 #### Attributes:
 
@@ -954,6 +1322,14 @@ expanded into VM ops and the vmla.buffer.const op.
 
 ### `vmla.reverse` (IREE::VMLA::ReverseOp)
 
+
+
+Syntax:
+
+```
+operation ::= `vmla.reverse` $src`(`$src_shape `:` type($src_shape)`)``,`
+              `out` $dst`(`$dst_shape `:` type($dst_shape)`)` attr-dict `:` $element_type
+```
 
 
 
@@ -977,6 +1353,13 @@ expanded into VM ops and the vmla.buffer.const op.
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.rsqrt` $src`,` `out` $dst attr-dict `:` $element_type
+```
+
+
 
 #### Attributes:
 
@@ -994,6 +1377,13 @@ expanded into VM ops and the vmla.buffer.const op.
 
 ### `vmla.select` (IREE::VMLA::SelectOp)
 
+
+
+Syntax:
+
+```
+operation ::= `vmla.select` $cond`,` $lhs`,` $rhs`,` `out` $dst attr-dict `:` $element_type
+```
 
 
 
@@ -1016,6 +1406,13 @@ expanded into VM ops and the vmla.buffer.const op.
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.shl` $lhs`,` $rhs`,` `out` $dst attr-dict `:` $element_type
+```
+
+
 
 #### Attributes:
 
@@ -1034,6 +1431,13 @@ expanded into VM ops and the vmla.buffer.const op.
 
 ### `vmla.shr` (IREE::VMLA::ShrOp)
 
+
+
+Syntax:
+
+```
+operation ::= `vmla.shr` $lhs`,` $rhs`,` `out` $dst attr-dict `:` $element_type
+```
 
 
 
@@ -1056,6 +1460,13 @@ expanded into VM ops and the vmla.buffer.const op.
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.sin` $src`,` `out` $dst attr-dict `:` $element_type
+```
+
+
 
 #### Attributes:
 
@@ -1075,6 +1486,13 @@ expanded into VM ops and the vmla.buffer.const op.
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.sqrt` $src`,` `out` $dst attr-dict `:` $element_type
+```
+
+
 
 #### Attributes:
 
@@ -1092,6 +1510,13 @@ expanded into VM ops and the vmla.buffer.const op.
 
 ### `vmla.sub` (IREE::VMLA::SubOp)
 
+
+
+Syntax:
+
+```
+operation ::= `vmla.sub` $lhs`,` $rhs`,` `out` $dst attr-dict `:` $element_type
+```
 
 
 
@@ -1114,6 +1539,13 @@ expanded into VM ops and the vmla.buffer.const op.
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.tanh` $src`,` `out` $dst attr-dict `:` $element_type
+```
+
+
 
 #### Attributes:
 
@@ -1131,6 +1563,14 @@ expanded into VM ops and the vmla.buffer.const op.
 
 ### `vmla.tile` (IREE::VMLA::TileOp)
 
+
+
+Syntax:
+
+```
+operation ::= `vmla.tile` $src`(`$src_shape `:` type($src_shape)`)``,`
+              `out` $dst`(`$dst_shape `:` type($dst_shape)`)` attr-dict `:` $element_type
+```
 
 
 
@@ -1153,6 +1593,14 @@ expanded into VM ops and the vmla.buffer.const op.
 
 
 
+Syntax:
+
+```
+operation ::= `vmla.transpose` $src`(`$src_shape `:` type($src_shape)`)``,`
+              `out` $dst`(`$dst_shape `:` type($dst_shape)`)` attr-dict `:` $element_type
+```
+
+
 
 #### Attributes:
 
@@ -1172,6 +1620,13 @@ expanded into VM ops and the vmla.buffer.const op.
 
 ### `vmla.xor` (IREE::VMLA::XorOp)
 
+
+
+Syntax:
+
+```
+operation ::= `vmla.xor` $lhs`,` $rhs`,` `out` $dst attr-dict `:` $element_type
+```
 
 
 

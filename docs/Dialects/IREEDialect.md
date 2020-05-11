@@ -52,48 +52,67 @@ the final step in compilation.
 | :----: | ----------- |
 `results` | any type
 
-### `iree.load_input` (IREE::LoadInputOp)
+### `iree.dynamic_shape_constant` (IREE::DynamicShapeConstantOp)
 
-
+A tensor constant that can have dynamic dimensions
 
 Syntax:
 
 ```
-operation ::= `iree.load_input` `(` $src `:` type($src) `)` attr-dict `:` type(results)
+operation ::= `iree.dynamic_shape_constant` $value attr-dict `->` type($result)
 ```
 
 
+Allows specifying a constant where the return value can erase shape
+information. This operation is declared as having side effects and has no
+folder, so will not be optimized away by the compiler. The underlying shape
+information should be hidden from the compiler and resolved at runtime.
 
-#### Operands:
+```mlir
+%c = iree.dynamic_shape_constant tensor<2x2xf32> -> tensor<?x?xf32>
+%res = "xla_hlo.abs"(%c) : (tensor<?x?xf32>) -> tensor<?x?xf32>
+```
 
-| Operand | Description |
-| :-----: | ----------- |
-`src` | memref of signless integer or floating-point values
+#### Attributes:
+
+| Attribute | MLIR Type | Description |
+| :-------: | :-------: | ----------- |
+`value` | ElementsAttr | constant vector/tensor attribute
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-&laquo;unnamed&raquo; | any type
+`result` | tensor of any type values
 
-### `iree.store_output` (IREE::StoreOutputOp)
+### `iree.placeholder` (IREE::PlaceholderOp)
 
-
+A placeholder op to feed a value/buffer into computation
 
 Syntax:
 
 ```
-operation ::= `iree.store_output` `(` $src `:` type($src) `,` $dst `:` type($dst) `)` attr-dict
+operation ::= `iree.placeholder` `for` $purpose attr-dict `:` type($output)
 ```
 
 
+This op is intended as a way to represent a value or buffer that will be fed
+into computation. It can host additional attributes related to the value or
+buffer. This op can be used for the cases where one need to feed in value or
+buffer to computation in a function but cannot do that via the function
+argument due to ABI or contract issues.
 
-#### Operands:
+#### Attributes:
 
-| Operand | Description |
-| :-----: | ----------- |
-`src` | any type
-`dst` | memref of signless integer or floating-point values
+| Attribute | MLIR Type | Description |
+| :-------: | :-------: | ----------- |
+`purpose` | StringAttr | string attribute
+
+#### Results:
+
+| Result | Description |
+| :----: | ----------- |
+`output` | any type
 
 ### `iree.unfoldable_constant` (IREE::UnfoldableConstantOp)
 

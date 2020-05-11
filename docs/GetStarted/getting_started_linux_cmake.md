@@ -3,6 +3,7 @@ layout: default
 permalink: GetStarted/LinuxCMake
 parent: Getting Started
 title: Linux with CMake
+nav_order: 1
 ---
 
 # Getting Started on Linux with CMake
@@ -26,11 +27,18 @@ documented separately, as they require further setup.
 
 ### Install CMake
 
-Install CMake version >= 3.13:
+IREE uses CMake version `>= 3.13`. First try installing via your distribution's
+package manager and verify the version:
 
 ```shell
 $ sudo apt install cmake
+$ cmake --version # >= 3.13
 ```
+
+Some package managers (like `apt`) distribute old versions of cmake. If your
+package manager installs a version `< 3.13`, then follow the installation
+instructions [here](https://cmake.org/install/) to install a newer version (e.g.
+the latest).
 
 > Tip
 > {: .label .label-green }
@@ -50,13 +58,6 @@ We recommend Clang. GCC is not fully supported.
 
 ```shell
 $ sudo apt install clang
-```
-
-Set environment variables:
-
-```shell
-export CC=clang
-export CXX=clang++
 ```
 
 ## Clone and Build
@@ -81,7 +82,7 @@ $ git submodule update --init
 Configure:
 
 ```shell
-$ cmake -G Ninja -B build/ .
+$ cmake -G Ninja -B build/ -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ .
 ```
 
 > Tip
@@ -121,9 +122,5 @@ $ ./build/iree/tools/iree-run-mlir $PWD/iree/tools/test/simple.mlir -input-value
     [Developer Overview](../developer_overview.md)
 *   To target GPUs using Vulkan, see
     [Getting Started on Linux with Vulkan](getting_started_linux_vulkan.md)
-
-More documentation coming soon...
-
-<!-- TODO(scotttodd): Running tests -->
-<!-- TODO(scotttodd): Running samples -->
-<!-- TODO(scotttodd): Python -->
+*   To use IREE's Python bindings, see
+    [Getting Started with Python](getting_started_python.md)
