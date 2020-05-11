@@ -41,10 +41,14 @@ def VMLA_ConstantOp : VMLA_PureOp<"constant"> {
   );
 
   let builders = [
-    OpBuilder<"Builder *builder, OperationState &result, ElementsAttr value", [{
-      build(builder, result, IREE::VMLA::BufferType::get(builder->getContext()), value);
+    OpBuilder<"OpBuilder &builder, OperationState &result, ElementsAttr value",
+    [{
+      build(builder, result, IREE::VMLA::BufferType::get(builder.getContext()),
+            value);
     }]>,
   ];
+
+  let assemblyFormat = "attr-dict $value `->` type($result)";
 }
 
 //===----------------------------------------------------------------------===//
@@ -58,6 +62,8 @@ def VMLA_BufferConstOp : VMLA_PureOp<"buffer.const"> {
   let results = (outs
     VMLA_Buffer:$result
   );
+
+  let assemblyFormat = "$value attr-dict `:` type($value) `->` type($result)";
 }
 
 def VMLA_BufferAllocOp : VMLA_Op<"buffer.alloc"> {
@@ -67,6 +73,10 @@ def VMLA_BufferAllocOp : VMLA_Op<"buffer.alloc"> {
   let results = (outs
     VMLA_Buffer:$result
   );
+
+  let assemblyFormat = [{
+    `byte_length` `=` $byte_length attr-dict `:` type($result)
+  }];
 }
 
 def VMLA_BufferCloneOp : VMLA_Op<"buffer.clone"> {
@@ -76,6 +86,8 @@ def VMLA_BufferCloneOp : VMLA_Op<"buffer.clone"> {
   let results = (outs
     VMLA_Buffer:$result
   );
+
+  let assemblyFormat = "$src attr-dict `:` type($result)";
 }
 
 def VMLA_BufferByteLengthOp : VMLA_PureOp<"buffer.byte_length"> {
@@ -85,6 +97,8 @@ def VMLA_BufferByteLengthOp : VMLA_PureOp<"buffer.byte_length"> {
   let results = (outs
     VMLA_DeviceSize:$result
   );
+
+  let assemblyFormat = "$value attr-dict `:` type($result)";
 }
 
 def VMLA_BufferViewOp : VMLA_PureOp<"buffer.view"> {
@@ -96,6 +110,11 @@ def VMLA_BufferViewOp : VMLA_PureOp<"buffer.view"> {
   let results = (outs
     VMLA_Buffer:$result
   );
+
+  let assemblyFormat = [{
+    $src`[`$byte_offset`]``,` `byte_length` `=` $byte_length
+    attr-dict `:` type($result)
+  }];
 }
 
 def VMLA_BufferCopyOp : VMLA_Op<"buffer.copy"> {
@@ -106,6 +125,12 @@ def VMLA_BufferCopyOp : VMLA_Op<"buffer.copy"> {
     VMLA_DeviceSize:$dst_byte_offset,
     VMLA_DeviceSize:$byte_length
   );
+
+  let assemblyFormat = [{
+    $src`[`$src_byte_offset`]``,`
+    `out` $dst`[`$dst_byte_offset`]``,` `byte_length` `=` $byte_length
+    attr-dict
+  }];
 }
 
 def VMLA_BufferFillOp : VMLA_Op<"buffer.fill"> {
@@ -113,6 +138,8 @@ def VMLA_BufferFillOp : VMLA_Op<"buffer.fill"> {
     VMLA_Buffer:$value,
     VMLA_Buffer:$dst
   );
+
+  let assemblyFormat = "$value`,` `out` $dst attr-dict";
 }
 
 def VMLA_BufferLoadI32Op : VMLA_PureOp<"buffer.load.i32"> {
@@ -123,6 +150,8 @@ def VMLA_BufferLoadI32Op : VMLA_PureOp<"buffer.load.i32"> {
   let results = (outs
     I32:$result
   );
+
+  let assemblyFormat = "$src`[`$byte_offset`]` attr-dict `:` type($result)";
 }
 
 //===----------------------------------------------------------------------===//
@@ -137,6 +166,10 @@ def VMLA_CmpOp : VMLA_ElementTypeOp<"cmp"> {
     VMLA_Buffer:$dst,
     VMLA_AnyTypeAttr:$element_type
   );
+
+  let assemblyFormat = [{
+    $predicate`,` $lhs`,` $rhs`,` `out` $dst attr-dict `:` $element_type
+  }];
 }
 
 def VMLA_SelectOp : VMLA_ElementTypeOp<"select"> {
@@ -147,6 +180,10 @@ def VMLA_SelectOp : VMLA_ElementTypeOp<"select"> {
     VMLA_Buffer:$dst,
     VMLA_AnyTypeAttr:$element_type
   );
+
+  let assemblyFormat = [{
+    $cond`,` $lhs`,` $rhs`,` `out` $dst attr-dict `:` $element_type
+  }];
 }
 
 //===----------------------------------------------------------------------===//
@@ -167,6 +204,14 @@ def VMLA_CopyOp : VMLA_ElementTypeOp<"copy", [
     Variadic<VMLA_Index>:$lengths,
     VMLA_AnyTypeAttr:$element_type
   );
+
+  let assemblyFormat = [{
+    $src`(`$src_shape `:` type($src_shape)`)``,`
+    (`src_indices` `=` `[` $src_indices^ `]``,`)?
+    `out` $dst`(`$dst_shape `:` type($dst_shape)`)`
+    (`,` `dst_indices` `=` `[` $dst_indices^ `]`)?
+    (`,` `lengths` `=` `[` $lengths^ `]`)? attr-dict `:` $element_type
+  }];
 }
 
 def VMLA_TransposeOp : VMLA_ElementTypeOp<"transpose", [VMLA_IncludeShapes]> {
@@ -178,6 +223,11 @@ def VMLA_TransposeOp : VMLA_ElementTypeOp<"transpose", [VMLA_IncludeShapes]> {
     VMLA_Shape:$dst_shape,
     VMLA_AnyTypeAttr:$element_type
   );
+
+  let assemblyFormat = [{
+    $src`(`$src_shape `:` type($src_shape)`)``,`
+    `out` $dst`(`$dst_shape `:` type($dst_shape)`)` attr-dict `:` $element_type
+  }];
 }
 
 def VMLA_ReverseOp : VMLA_ElementTypeOp<"reverse", [VMLA_IncludeShapes]> {
@@ -189,6 +239,11 @@ def VMLA_ReverseOp : VMLA_ElementTypeOp<"reverse", [VMLA_IncludeShapes]> {
     VMLA_Shape:$dst_shape,
     VMLA_AnyTypeAttr:$element_type
   );
+
+  let assemblyFormat = [{
+    $src`(`$src_shape `:` type($src_shape)`)``,`
+    `out` $dst`(`$dst_shape `:` type($dst_shape)`)` attr-dict `:` $element_type
+  }];
 }
 
 def VMLA_PadOp : VMLA_ElementTypeOp<"pad", [VMLA_IncludeShapes]> {
@@ -204,6 +259,12 @@ def VMLA_PadOp : VMLA_ElementTypeOp<"pad", [VMLA_IncludeShapes]> {
     ElementsAttr:$interior_padding,
     VMLA_AnyTypeAttr:$element_type
   );
+
+  let assemblyFormat = [{
+    $src`(`$src_shape `:` type($src_shape)`)``,`
+    $value`(`$value_shape `:` type($value_shape)`)``,`
+    `out` $dst`(`$dst_shape `:` type($dst_shape)`)` attr-dict `:` $element_type
+  }];
 }
 
 def VMLA_BroadcastOp : VMLA_ElementTypeOp<"broadcast", [VMLA_IncludeShapes]> {
@@ -214,6 +275,11 @@ def VMLA_BroadcastOp : VMLA_ElementTypeOp<"broadcast", [VMLA_IncludeShapes]> {
     VMLA_Shape:$dst_shape,
     VMLA_AnyTypeAttr:$element_type
   );
+
+  let assemblyFormat = [{
+    $src`(`$src_shape `:` type($src_shape)`)``,`
+    `out` $dst`(`$dst_shape `:` type($dst_shape)`)` attr-dict `:` $element_type
+  }];
 }
 
 def VMLA_TileOp : VMLA_ElementTypeOp<"tile", [VMLA_IncludeShapes]> {
@@ -224,6 +290,31 @@ def VMLA_TileOp : VMLA_ElementTypeOp<"tile", [VMLA_IncludeShapes]> {
     VMLA_Shape:$dst_shape,
     VMLA_AnyTypeAttr:$element_type
   );
+
+  let assemblyFormat = [{
+    $src`(`$src_shape `:` type($src_shape)`)``,`
+    `out` $dst`(`$dst_shape `:` type($dst_shape)`)` attr-dict `:` $element_type
+  }];
+}
+
+def VMLA_GatherOp : VMLA_ElementTypeOp<"gather", [VMLA_IncludeShapes]> {
+  let arguments = (ins
+    VMLA_Buffer:$src,
+    VMLA_Shape:$src_shape,
+    VMLA_Buffer:$indices,
+    VMLA_Shape:$indices_shape,
+    VMLA_Buffer:$dst,
+    VMLA_Shape:$dst_shape,
+    I64Attr:$dim,
+    I64Attr:$batch_dims,
+    VMLA_AnyTypeAttr:$element_type
+  );
+
+  let assemblyFormat = [{
+    $src`(`$src_shape `:` type($src_shape)`)``,`
+    $indices`(`$indices_shape `:` type($indices_shape)`)``,`
+    `out` $dst`(`$dst_shape `:` type($dst_shape)`)` attr-dict `:` $element_type
+  }];
 }
 
 //===----------------------------------------------------------------------===//
@@ -282,6 +373,10 @@ def VMLA_ConvertOp : VMLA_Op<"convert", [VMLA_OpInterface]> {
       state.addAttribute("dst_type", TypeAttr::get(resultTypes[0]));
     }
   }];
+
+  let assemblyFormat = [{
+    $src`,` `out` $dst attr-dict `:` $src_type `->` $dst_type
+  }];
 }
 
 //===----------------------------------------------------------------------===//
@@ -314,6 +409,12 @@ def VLMA_ConvOp : VMLA_Op<"conv", [VMLA_IncludeShapes]> {
       state.addAttribute("dst_type", TypeAttr::get(resultTypes[0]));
     }
   }];
+
+  let assemblyFormat = [{
+    $input`(`$input_shape `:` type($input_shape)`)` `:` $input_type`,`
+    $filter`(`$filter_shape `:` type($filter_shape)`)` `:` $filter_type`,`
+    `out` $dst`(`$dst_shape `:` type($dst_shape)`)` `:` $dst_type attr-dict
+  }];
 }
 
 //===----------------------------------------------------------------------===//
@@ -329,7 +430,7 @@ def VMLA_BatchMatMulPseudoOp : VMLA_Op<"batch.matmul.pseudo"> {
     All operands are rank-3 with the following dimension structure:
     - lhs = [B, FLHS, C]
     - rhs = [B, FRHS, C]
-    - dst = [B, FLHS, FRHS]
+    - dst = [B, FRHS, FLHS]
     Where:
     - B = batch dimension
     - C = contracting dimension
@@ -355,6 +456,11 @@ def VMLA_BatchMatMulPseudoOp : VMLA_Op<"batch.matmul.pseudo"> {
   let results = (outs
     AnyTensor:$dst
   );
+
+  let assemblyFormat = [{
+    $lhs`,` $rhs attr-dict `:`
+    `(`type($lhs)`,` type($rhs)`)` `->` type($dst)
+  }];
 }
 
 def VMLA_BatchMatMulOp : VMLA_Op<"batch.matmul", [VMLA_OpInterface, VMLA_IncludeShapes]> {
@@ -377,6 +483,12 @@ def VMLA_BatchMatMulOp : VMLA_Op<"batch.matmul", [VMLA_OpInterface, VMLA_Include
       state.addAttribute("dst_type", TypeAttr::get(resultTypes[0]));
     }
   }];
+
+  let assemblyFormat = [{
+    $lhs`(`$lhs_shape `:` type($lhs_shape)`)` `:` $lhs_type`,`
+    $rhs`(`$rhs_shape `:` type($rhs_shape)`)` `:` $rhs_type`,`
+    `out` $dst`(`$dst_shape `:` type($dst_shape)`)` `:` $dst_type attr-dict
+  }];
 }
 
 //===----------------------------------------------------------------------===//
@@ -395,6 +507,12 @@ class VMLA_ReduceOp<string mnemonic, list<OpTrait> traits = []> :
     VMLA_Shape:$dst_shape,
     VMLA_AnyTypeAttr:$element_type
   );
+
+  let assemblyFormat = [{
+    $src`(`$src_shape `:` type($src_shape)`)``,`
+    $init`(`$init_shape `:` type($init_shape)`)``,`
+    `out` $dst`(`$dst_shape `:` type($dst_shape)`)` attr-dict `:` $element_type
+  }];
 }
 
 def VMLA_ReduceSumOp : VMLA_ReduceOp<"reduce.sum">;
@@ -415,6 +533,12 @@ class VMLA_PoolingOp<string mnemonic, list<OpTrait> traits = []> :
     I32ElementsAttr:$window_strides,
     I32ElementsAttr:$padding
   );
+
+  let assemblyFormat = [{
+    $src`(`$src_shape `:` type($src_shape)`)``,`
+    $init`(`$init_shape `:` type($init_shape)`)``,`
+    `out` $dst`(`$dst_shape `:` type($dst_shape)`)` attr-dict `:` $element_type
+  }];
 }
 
 def VMLA_PoolingSumOp : VMLA_PoolingOp<"pooling.sum">;
@@ -434,6 +558,10 @@ def VMLA_InterfaceConstOp :
   let results = (outs
     AnyTypeOf<[I32, VMLA_Index]>:$result
   );
+
+  let assemblyFormat = [{
+    $interface attr-dict `:` type($result)
+  }];
 }
 
 def VMLA_InterfaceBindingOp :
@@ -446,6 +574,10 @@ def VMLA_InterfaceBindingOp :
   let results = (outs
     VMLA_Buffer:$result
   );
+
+  let assemblyFormat = [{
+    $interface attr-dict `:` type($result)
+  }];
 }
 
 #endif  // IREE_DIALECT_VMLA_OPS

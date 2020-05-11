@@ -16,6 +16,22 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    ConvertToHAL
+  HDRS
+    "ConvertToHAL.h"
+  SRCS
+    "ConvertToHAL.cpp"
+  DEPS
+    MLIRIR
+    MLIRStandardOps
+    MLIRTransforms
+    iree::compiler::Dialect::HAL::IR
+    iree::compiler::Dialect::IREE::IR
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     PreserveCompilerHints
   HDRS
     "PreserveCompilerHints.h"
@@ -25,6 +41,5 @@ iree_cc_library(
     MLIRIR
     MLIRTransforms
     iree::compiler::Dialect::IREE::IR
-  ALWAYSLINK
   PUBLIC
 )

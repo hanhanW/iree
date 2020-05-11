@@ -74,24 +74,24 @@ void buildHALTransformPassPipeline(OpPassManager &passManager,
   // been expanded to primitives.
   passManager.addPass(createPublicABIGenerationPass());
 
+  // Gather cachable resources such as executables and descriptor sets and
+  // cache them at initialization-time.
   passManager.addPass(createMaterializeResourceCachesPass(targetOptions));
 
+  // Inline hal.device.switch ops and memoize their queries such that we can
+  // better CSE/fold dispatch logic.
+  passManager.addPass(createInlineDeviceSwitchesPass());
+  passManager.addPass(createMemoizeDeviceQueriesPass());
   passManager.addNestedPass<FuncOp>(createCanonicalizerPass());
   passManager.addNestedPass<FuncOp>(createCSEPass());
-
-  passManager.addPass(createOutlineDeviceSwitchesPass());
-  passManager.addPass(createMemoizeDeviceQueriesPass());
-  // TODO(benvanik): function deduplication to remove outlined functions.
-
-  // TODO(benvanik): run symbol DCE when all symbols have visibility defined.
-  // Right now the global value initializers don't have proper tracking and if
-  // we do this we lose initializers that have side effects we care about.
-  // passManager.addPass(createSymbolDCEPass());
 
   // TODO(GH-1036): run this once per hal.executable.target in a nested pass
   // manager so that we have as many passes as hal.executable.target ops.
   if (transformOptions.serializeExecutables) {
     passManager.addPass(createSerializeExecutablesPass(targetOptions));
+    // NOTE: symbol DCE will destroy executable target contents, so only run it
+    // if we serialized things.
+    passManager.addPass(createSymbolDCEPass());
   }
 }
 

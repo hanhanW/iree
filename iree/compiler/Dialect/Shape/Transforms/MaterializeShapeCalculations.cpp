@@ -17,6 +17,7 @@
 #include "iree/compiler/Dialect/Shape/IR/ShapeInterface.h"
 #include "iree/compiler/Dialect/Shape/IR/ShapeOps.h"
 #include "iree/compiler/Dialect/Shape/IR/ShapeTypes.h"
+#include "iree/compiler/Dialect/Shape/Plugins/VMLA/VMLAShapeBuilder.h"
 #include "iree/compiler/Dialect/Shape/Plugins/XLA/XlaHloShapeBuilder.h"
 #include "iree/compiler/Dialect/Shape/Transforms/Patterns.h"
 #include "iree/compiler/Utils/PatternUtils.h"
@@ -47,109 +48,99 @@ const CustomOpShapeBuilderList *getCustomOpShapeBuilder() {
   static CustomOpShapeBuilderList globalBuilders = ([]() {
     CustomOpShapeBuilderList builders;
     xla_hlo::populateXlaHloCustomOpShapeBuilder(builders);
+    IREE::VMLA::populateVMLACustomOpShapeBuilder(builders);
     return builders;
   })();
   return &globalBuilders;
 }
 
 Value rewriteShapexRankedBroadcastShape(
-    RankedBroadcastShapeOp bcastOp,
-    RankedBroadcastShapeOp::OperandAdaptor operands, OpBuilder &builder) {
-  auto lhsRs = operands.lhs().getType().cast<RankedShapeType>();
-  auto rhsRs = operands.rhs().getType().cast<RankedShapeType>();
+    RankedBroadcastShapeOp op, RankedBroadcastShapeOp::OperandAdaptor operands,
+    OpBuilder &builder) {
+  auto lhs = operands.lhs();
+  auto rhs = operands.rhs();
+  auto loc = op.getLoc();
+  auto resultRs = op.getResult().getType().cast<RankedShapeType>();
 
-  auto loc = bcastOp.getLoc();
-  auto resultRs = bcastOp.getResult().getType().cast<RankedShapeType>();
-  auto dimType = IndexType::get(builder.getContext());
+  auto c1 = builder.create<ConstantIndexOp>(loc, 1);
+  // Entries are the extent of the output along that dimension corresponding to
+  // the given side, or 1 (which is neutral w.r.t. broadcasting).
+  SmallVector<Value, 4> lhsResultExtents(resultRs.getRank(), c1);
+  SmallVector<Value, 4> rhsResultExtents(resultRs.getRank(), c1);
 
-  // Pairs of the shape dim and corresponding value if dynamic.
-  SmallVector<std::pair<Optional<int>, Value>, 4> lhsDims;
-  SmallVector<std::pair<Optional<int>, Value>, 4> rhsDims;
-  lhsDims.resize(resultRs.getRank());
-  rhsDims.resize(resultRs.getRank());
+  for (auto dim : llvm::enumerate(op.lhs_broadcast_dimensions())) {
+    auto inputDim = dim.index();
+    auto outputDim = dim.value().getZExtValue();
+    lhsResultExtents[outputDim] =
+        builder.create<RankedDimOp>(loc, lhs, inputDim);
+  }
+  for (auto dim : llvm::enumerate(op.rhs_broadcast_dimensions())) {
+    auto inputDim = dim.index();
+    auto outputDim = dim.value().getZExtValue();
+    rhsResultExtents[outputDim] =
+        builder.create<RankedDimOp>(loc, rhs, inputDim);
+  }
 
-  // Populate the lhs dims.
-  for (auto dimMap : llvm::enumerate(bcastOp.lhs_broadcast_dimensions())) {
-    auto inputDimIndex = dimMap.index();
-    auto outputDimIndex = dimMap.value().getZExtValue();
-    assert(outputDimIndex < lhsDims.size());
-    if (!resultRs.isDimDynamic(outputDimIndex)) {
-      // No need to populate fully static dimensions.
-      continue;
-    }
-    if (lhsRs.isDimDynamic(inputDimIndex)) {
-      lhsDims[outputDimIndex] =
-          std::make_pair(-1, builder.create<RankedDimOp>(
-                                 loc, dimType, operands.lhs(),
-                                 builder.getI64IntegerAttr(inputDimIndex)));
-    } else {
-      lhsDims[outputDimIndex] = std::make_pair(inputDimIndex, nullptr);
+  SmallVector<Value, 4> resultExtents;
+  for (auto t : llvm::zip(lhsResultExtents, rhsResultExtents)) {
+    auto lhsExtent = std::get<0>(t);
+    auto rhsExtent = std::get<1>(t);
+    auto ugt =
+        builder.create<CmpIOp>(loc, CmpIPredicate::ugt, lhsExtent, rhsExtent);
+    auto max = builder.create<SelectOp>(loc, ugt, lhsExtent, rhsExtent);
+    resultExtents.push_back(max);
+    // TODO(silvasean): Create error handling code for invalid broadcasts.
+    // Use vm.cond_fail (or something that lowers to that).
+  }
+
+  // MakeRankedShapeOp only accepts the dynamic dims, so filter appropriately.
+  SmallVector<Value, 4> filteredResultExtents;
+  for (int i = 0, e = resultRs.getRank(); i < e; i++) {
+    if (resultRs.isDimDynamic(i)) {
+      filteredResultExtents.push_back(resultExtents[i]);
     }
   }
 
-  // Populate the rhs dims.
-  for (auto dimMap : llvm::enumerate(bcastOp.rhs_broadcast_dimensions())) {
-    auto inputDimIndex = dimMap.index();
-    auto outputDimIndex = dimMap.value().getZExtValue();
-    assert(outputDimIndex < rhsDims.size());
-    if (!resultRs.isDimDynamic(outputDimIndex)) {
-      // No need to populate fully static dimensions.
-      continue;
-    }
-    if (rhsRs.isDimDynamic(inputDimIndex)) {
-      rhsDims[outputDimIndex] =
-          std::make_pair(-1, builder.create<RankedDimOp>(
-                                 loc, dimType, operands.rhs(),
-                                 builder.getI64IntegerAttr(inputDimIndex)));
-    } else {
-      rhsDims[outputDimIndex] = std::make_pair(inputDimIndex, nullptr);
+  return builder.create<MakeRankedShapeOp>(loc, resultRs,
+                                           filteredResultExtents);
+}
+
+LogicalResult expandGatherExtentsOp(GatherExtentsOp op,
+                                    GatherExtentsOp::OperandAdaptor operands,
+                                    PatternRewriter &rewriter) {
+  // Calculate cumulative sums of the ranks of each operand, which allows
+  // us to map each index to its corresponding operand easily.
+  SmallVector<int64_t, 6> cumsum;
+  cumsum.push_back(0);
+  for (auto operand : operands.shapes()) {
+    auto rank = operand.getType().cast<Shape::RankedShapeType>().getRank();
+    cumsum.push_back(cumsum.back() + rank);
+  }
+
+  // For each index, extract the relevant extent from the operands.
+  SmallVector<Value, 6> extents;
+  for (auto index : op.indices().getValues<int64_t>()) {
+    auto it = llvm::upper_bound(cumsum, index) - 1;
+    auto operandNum = std::distance(cumsum.begin(), it);
+    auto dimNum = index - *it;
+    auto extent = rewriter.create<Shape::RankedDimOp>(
+        op.getLoc(), operands.shapes()[operandNum], dimNum);
+    extents.push_back(extent);
+  }
+
+  // Due to a quirk of MakeRankedShapeOp, we only want the dynamic
+  // dimensions.
+  SmallVector<Value, 6> onlyDynamicExtents;
+  auto resultType = op.result().getType().cast<Shape::RankedShapeType>();
+  for (int i = 0, e = resultType.getRank(); i < e; i++) {
+    if (resultType.isDimDynamic(i)) {
+      onlyDynamicExtents.push_back(extents[i]);
     }
   }
 
-  // Now compute dynamic dims for each output dim.
-  SmallVector<Value, 4> dynamicDims;
-  for (int i = 0; i < lhsDims.size(); ++i) {
-    if (!resultRs.isDimDynamic(i)) continue;
-    auto lhsDimInfo = lhsDims[i];
-    auto lhsDimSize = lhsDimInfo.first ? *lhsDimInfo.first : -1;
-    auto rhsDimInfo = rhsDims[i];
-    auto rhsDimSize = rhsDimInfo.first ? *rhsDimInfo.first : -1;
-
-    if (lhsDimSize > 1) {
-      // Non-degenerate static.
-      bcastOp.emitRemark(
-          "broadcast of non-degenerate lhs static dim not implemented");
-      return nullptr;
-    } else if (rhsDimSize > 1) {
-      // Non-degenerate static.
-      bcastOp.emitRemark(
-          "broadcast of non-degenerate rhs static dim not implemented");
-      return nullptr;
-    } else if (lhsDimSize == 1) {
-      // Degenerate static.
-      bcastOp.emitRemark(
-          "broadcast of degenerate lhs static dim not implemented");
-      return nullptr;
-    } else if (rhsDimSize == 1) {
-      // Degenerate static.
-      bcastOp.emitRemark(
-          "broadcast of degenerate rhs static dim not implemented");
-      return nullptr;
-    } else {
-      // Dynamic.
-      // TODO: Generate code to assert.
-      if (lhsDimInfo.second) {
-        dynamicDims.push_back(lhsDimInfo.second);
-      } else if (rhsDimInfo.second) {
-        dynamicDims.push_back(rhsDimInfo.second);
-      } else {
-        return nullptr;
-      }
-    }
-  }
-
-  // And make the result shape.
-  return builder.create<MakeRankedShapeOp>(loc, resultRs, dynamicDims);
+  rewriter.replaceOpWithNewOp<Shape::MakeRankedShapeOp>(op, resultType,
+                                                        onlyDynamicExtents);
+  return success();
 }
 
 LogicalResult expandRankedBroadcastShapePattern(
@@ -283,12 +274,15 @@ void setupMaterializeShapeCalculationsLegality(ConversionTarget &target) {
   // We explicitly want to convert these ops, eliminating them.
   target.addIllegalOp<GetRankedShapeOp>();
   target.addIllegalOp<RankedBroadcastShapeOp>();
+  target.addIllegalOp<GatherExtentsOp>();
 }
 
 void populateMaterializeShapeCalculationsConversionPatterns(
     OwningRewritePatternList &patterns, MLIRContext *context) {
   // Fallback patterns.
   insertConversionPattern(patterns, context, expandRankedBroadcastShapePattern,
+                          /*benefit=*/1);
+  insertConversionPattern(patterns, context, expandGatherExtentsOp,
                           /*benefit=*/1);
   insertConversionPattern(patterns, context, materializeRankedShapePattern,
                           /*benefit=*/1);

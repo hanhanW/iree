@@ -35,21 +35,20 @@ class IREE_PureOp<string mnemonic, list<OpTrait> traits = []> :
 // Executable ABI
 //===----------------------------------------------------------------------===//
 
-def IREE_LoadInputOp : IREE_PureOp<"load_input"> {
-  let arguments = (ins IREE_MemRef:$src);
-  let results = (outs AnyType);
-
-  let assemblyFormat = [{
-    `(` $src `:` type($src) `)` attr-dict `:` type(results)
+def IREE_PlaceholderOp : IREE_Op<"placeholder", [MemoryEffects<[MemAlloc]>]> {
+  let summary = "A placeholder op to feed a value/buffer into computation";
+  let description = [{
+    This op is intended as a way to represent a value or buffer that will be fed
+    into computation. It can host additional attributes related to the value or
+    buffer. This op can be used for the cases where one need to feed in value or
+    buffer to computation in a function but cannot do that via the function
+    argument due to ABI or contract issues.
   }];
-}
 
-def IREE_StoreOutputOp : IREE_Op<"store_output"> {
-  let arguments = (ins AnyType:$src, IREE_MemRef:$dst);
+  let arguments = (ins StrAttr:$purpose);
+  let results = (outs Res<AnyType, "", [MemAlloc]>:$output);
 
-  let assemblyFormat = [{
-    `(` $src `:` type($src) `,` $dst `:` type($dst) `)` attr-dict
-  }];
+  let assemblyFormat = [{ `for` $purpose attr-dict `:` type($output) }];
 }
 
 //===----------------------------------------------------------------------===//
@@ -68,8 +67,30 @@ def IREE_DoNotOptimizeOp : IREE_Op<"do_not_optimize"> {
   let results = (outs Variadic<AnyType>:$results);
   let verifier = [{ return verify$cppClass(*this); }];
   let builders = [
-    OpBuilder<"Builder *builder, OperationState &state, ValueRange operands, ArrayRef<NamedAttribute> attributes = {}">
+    OpBuilder<"OpBuilder &builder, OperationState &state, ValueRange operands, "
+              "ArrayRef<NamedAttribute> attributes = {}">
   ];
+}
+
+// TODO(gcmn): It shouldn't be necessary to have both of these ops. Unify the
+// approach here.
+
+def IREE_DynamicShapeConstantOp : IREE_Op<"dynamic_shape_constant"> {
+  let summary = "A tensor constant that can have dynamic dimensions";
+  let description = [{
+    Allows specifying a constant where the return value can erase shape
+    information. This operation is declared as having side effects and has no
+    folder, so will not be optimized away by the compiler. The underlying shape
+    information should be hidden from the compiler and resolved at runtime.
+
+    ```mlir
+    %c = iree.dynamic_shape_constant tensor<2x2xf32> -> tensor<?x?xf32>
+    %res = "xla_hlo.abs"(%c) : (tensor<?x?xf32>) -> tensor<?x?xf32>
+    ```
+  }];
+  let arguments = (ins ElementsAttr:$value);
+  let results = (outs AnyTensor:$result);
+  let assemblyFormat = "$value attr-dict `->` type($result)";
 }
 
 def IREE_UnfoldableConstantOp : IREE_Op<"unfoldable_constant"> {
@@ -84,7 +105,7 @@ def IREE_UnfoldableConstantOp : IREE_Op<"unfoldable_constant"> {
   let results = (outs AnyType);
 
   let builders = [OpBuilder<
-    "Builder *builder, OperationState &result, Attribute value",
+    "OpBuilder &builder, OperationState &result, Attribute value",
     [{ build(builder, result, value.getType(), value); }]>];
 
   let hasCanonicalizer = 1;

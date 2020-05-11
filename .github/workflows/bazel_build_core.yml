@@ -1,0 +1,72 @@
+# Copyright 2019 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Builds and tests iree core directory.
+
+name: Bazel Build - Core
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  linux:
+    runs-on: ubuntu-18.04
+    container: l.gcr.io/google/bazel:2.1.0
+    env:
+      CXX: clang++
+      CC: clang
+      PYTHON_BIN: /usr/bin/python3
+    steps:
+      - name: Installing IREE dependencies
+        run: |
+          apt-get update
+          apt-get install -y clang libsdl2-dev
+      - name: Installing actions/checkout@v2 dependencies
+        run: |
+          # Update git to version >= 2.18 for actions/checkout@v2.
+          add-apt-repository ppa:git-core/ppa
+          apt-get update
+          apt-get install -y git
+      - name: Installing tensorflow dependencies
+        run: |
+          # Install python2 numpy. Temporary fix for issue #1737.
+          apt-get install -y python-pip
+          python -m pip install --upgrade pip
+          python -m pip install numpy
+      - name: Checking out repository
+        uses: actions/checkout@v2
+      - name: Initializing submodules
+        run: ./scripts/git/submodule_versions.py init
+      - name: Building and testing with bazel
+        run: |
+          # Build and test everything in the iree/ directory not explicitly
+          # marked as excluded from CI (using the tag
+          # "noga"="No GitHub Actions") or which uses vulkan at runtime.
+          # Note that somewhat contrary to its name `bazel test` will also build
+          # any non-test targets specified.
+          # We use `bazel query //...` piped to `bazel test` rather than the
+          # simpler `bazel test //...` because the latter excludes targets
+          # tagged "manual". The "manual" tag allows targets to be excluded from
+          # human wildcard builds, but we want them built by CI unless they are
+          # excluded with "noga".
+          bazel query '//iree/...' \
+            | xargs bazel test \
+              --build_tag_filters="-noga" \
+              --test_tag_filters="-noga,-driver=vulkan" \
+              --test_env=IREE_VULKAN_DISABLE=1 \
+              --test_env=IREE_AVAILABLE_BACKENDS="tf,iree_vmla" \
+              --define=iree_tensorflow=true \
+              --test_output=errors \
+              --keep_going

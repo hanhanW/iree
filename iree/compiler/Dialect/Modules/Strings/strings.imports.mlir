@@ -40,4 +40,12 @@ vm.import @print(%value : !vm.ref<!strings.string>)
 // Maps to the IREE::Strings::StringTensortoString.
 vm.import @string_tensor_to_string(%value : !vm.ref<!strings.string_tensor>) -> !vm.ref<!strings.string>
 
+// Gathers all the strings from a Tensor by ID
+// Maps to the IREE::Strings::Gather.
+vm.import @gather(%value1 : !vm.ref<!strings.string_tensor>, %value2 : !vm.ref<!hal.buffer_view>) -> !vm.ref<!strings.string_tensor>
+
+// Concatenates the strings in the tensor along the last dimension
+// Maps to the IREE::Strings::Concat.
+vm.import @concat(%value : !vm.ref<!strings.string_tensor>) -> !vm.ref<!strings.string_tensor>
+
 }  // vm.module

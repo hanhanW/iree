@@ -16,20 +16,13 @@
 #ifndef IREE_COMPILER_DIALECT_HAL_TARGET_LLVM_TARGET_H_
 #define IREE_COMPILER_DIALECT_HAL_TARGET_LLVM_TARGET_H_
 
+#include "iree/compiler/Dialect/HAL/Target/LLVM/LLVMTargetOptions.h"
 #include "iree/compiler/Dialect/HAL/Target/TargetBackend.h"
 
 namespace mlir {
 namespace iree_compiler {
 namespace IREE {
 namespace HAL {
-
-struct LLVMTargetOptions {
-  // TODO(ataei): Add LLVM compilation options.
-};
-
-// Returns LLVMTargetOptions struct intialized with the
-// iree-hal-llvm-ir-* flags.
-LLVMTargetOptions getLLVMTargetOptionsFromFlags();
 
 // Registers the LLVM backends.
 void registerLLVMTargetBackends(

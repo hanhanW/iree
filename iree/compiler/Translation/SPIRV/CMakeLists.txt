@@ -13,3 +13,14 @@
 # limitations under the License.
 
 iree_add_all_subdirs()
+
+iree_cc_library(
+  NAME
+    init_translations
+  HDRS
+    "init_translations.h"
+  DEPS
+    MLIRPass
+    iree::compiler::Translation::SPIRV::LinalgToSPIRV
+  PUBLIC
+)

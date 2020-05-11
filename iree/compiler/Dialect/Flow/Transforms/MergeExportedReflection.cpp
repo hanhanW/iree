@@ -72,13 +72,13 @@ class MergeExportedReflectionPass
     // have been promoted to inputs but they should still be tagged correctly).
     auto fPartialIdent = builder.getIdentifier("f_partial");
     for (int i = 0, e = func.getNumArguments(); i < e; ++i) {
-      NamedAttributeList l(
+      MutableDictionaryAttr l(
           func.getArgAttrOfType<DictionaryAttr>(i, reflectionIdent));
       if (failed(addItem(l.get(fPartialIdent), "argument", i))) {
         return;
       }
       l.remove(fPartialIdent);
-      auto updatedReflection = l.getDictionary();
+      auto updatedReflection = l.getDictionary(&getContext());
       if (updatedReflection) {
         func.setArgAttr(i, reflectionIdent, updatedReflection);
       } else {
@@ -88,13 +88,13 @@ class MergeExportedReflectionPass
 
     // Results.
     for (int i = 0, e = func.getNumResults(); i < e; ++i) {
-      NamedAttributeList l(
+      MutableDictionaryAttr l(
           func.getResultAttrOfType<DictionaryAttr>(i, reflectionIdent));
       if (failed(addItem(l.get(fPartialIdent), "result", i))) {
         return;
       }
       l.remove(fPartialIdent);
-      auto updatedReflection = l.getDictionary();
+      auto updatedReflection = l.getDictionary(&getContext());
       if (updatedReflection) {
         func.setResultAttr(i, reflectionIdent, updatedReflection);
       } else {
@@ -108,10 +108,11 @@ class MergeExportedReflectionPass
     SignatureBuilder functionSignature;
     functionSignature.Span(inputsAccum, 'I');
     functionSignature.Span(resultsAccum, 'R');
-    NamedAttributeList l(func.getAttrOfType<DictionaryAttr>(reflectionIdent));
+    MutableDictionaryAttr l(
+        func.getAttrOfType<DictionaryAttr>(reflectionIdent));
     l.set(fIdent, builder.getStringAttr(functionSignature.encoded()));
     l.set(fVersionIdent, builder.getStringAttr("1"));
-    func.setAttr(reflectionIdent, l.getDictionary());
+    func.setAttr(reflectionIdent, l.getDictionary(&getContext()));
   }
 };
 

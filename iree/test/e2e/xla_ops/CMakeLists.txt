@@ -35,15 +35,11 @@ iree_check_single_backend_test_suite(
     "broadcast.mlir"
     "broadcast_in_dim.mlir"
     "compare.mlir"
-    "concatenate.mlir"
     "constant.mlir"
-    "convert.mlir"
     "cosine.mlir"
+    "divide.mlir"
     "dot.mlir"
     "exponential.mlir"
-    "floor.mlir"
-    "gather.mlir"
-    "gather_concat.mlir"
     "gemm.mlir"
     "gemm_large.mlir"
     "log.mlir"
@@ -54,45 +50,15 @@ iree_check_single_backend_test_suite(
     "reduce.mlir"
     "remainder.mlir"
     "reshape.mlir"
-    "reverse.mlir"
     "rsqrt.mlir"
     "select.mlir"
-    "sine.mlir"
-    "slice.mlir"
     "sqrt.mlir"
-    "while.mlir"
+    "subtract.mlir"
+    "transpose.mlir"
   TARGET_BACKEND
     vulkan-spirv
   DRIVER
     vulkan
-)
-
-iree_check_single_backend_test_suite(
-  NAME
-    check_linalg-to-spirv_vulkan
-  SRCS
-    "abs.mlir"
-    "add.mlir"
-    "batch_norm_inference.mlir"
-    "broadcast_in_dim.mlir"
-    "constant.mlir"
-    "cosine.mlir"
-    "exponential.mlir"
-    "gemm.mlir"
-    "gemm_large.mlir"
-    "log.mlir"
-    "maximum.mlir"
-    "minimum.mlir"
-    "remainder.mlir"
-    "rsqrt.mlir"
-    "select.mlir"
-    "sqrt.mlir"
-  TARGET_BACKEND
-    vulkan-spirv
-  DRIVER
-    vulkan
-  COMPILER_FLAGS
-    "-iree-use-linalg-to-spirv-path"
 )
 
 iree_check_single_backend_test_suite(
@@ -103,10 +69,12 @@ iree_check_single_backend_test_suite(
     "add.mlir"
     "batch_norm_inference.mlir"
     "broadcast_in_dim.mlir"
+    "clamp.mlir"
     "compare.mlir"
     "constant.mlir"
     "convolution.mlir"
     "cosine.mlir"
+    "divide.mlir"
     "dot.mlir"
     "exponential.mlir"
     "gemm.mlir"
@@ -116,6 +84,7 @@ iree_check_single_backend_test_suite(
     "minimum.mlir"
     "multiply.mlir"
     "negate.mlir"
+    "pad.mlir"
     "reduce.mlir"
     "reduce_window.mlir"
     "remainder.mlir"
@@ -123,6 +92,8 @@ iree_check_single_backend_test_suite(
     "rsqrt.mlir"
     "select.mlir"
     "sqrt.mlir"
+    "subtract.mlir"
+    "transpose.mlir"
     "while.mlir"
   TARGET_BACKEND
     llvm-ir

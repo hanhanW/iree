@@ -31,9 +31,9 @@ namespace HAL {
 
 template <typename T>
 static LogicalResult parseEnumAttr(OpAsmParser &parser, StringRef attrName,
-                                   SmallVectorImpl<NamedAttribute> &attrs) {
+                                   NamedAttrList &attrs) {
   Attribute genericAttr;
-  SmallVector<NamedAttribute, 1> attrList;
+  NamedAttrList attrList;
   auto loc = parser.getCurrentLocation();
   if (failed(parser.parseAttribute(genericAttr,
                                    parser.getBuilder().getNoneType(), attrName,
@@ -68,14 +68,14 @@ void ExSharedDeviceOp::getAsmResultNames(
 // hal.make_memory_barrier
 //===----------------------------------------------------------------------===//
 
-void MakeMemoryBarrierOp::build(Builder *builder, OperationState &state,
+void MakeMemoryBarrierOp::build(OpBuilder &builder, OperationState &state,
                                 IREE::HAL::AccessScopeBitfield sourceScope,
                                 IREE::HAL::AccessScopeBitfield targetScope) {
-  state.addAttribute("source_scope", builder->getI32IntegerAttr(
+  state.addAttribute("source_scope", builder.getI32IntegerAttr(
                                          static_cast<int32_t>(sourceScope)));
-  state.addAttribute("target_scope", builder->getI32IntegerAttr(
+  state.addAttribute("target_scope", builder.getI32IntegerAttr(
                                          static_cast<int32_t>(targetScope)));
-  state.addTypes({MemoryBarrierType::get(builder->getContext())});
+  state.addTypes({MemoryBarrierType::get(builder.getContext())});
 }
 
 void MakeMemoryBarrierOp::getAsmResultNames(
@@ -87,16 +87,16 @@ void MakeMemoryBarrierOp::getAsmResultNames(
 // hal.make_buffer_barrier
 //===----------------------------------------------------------------------===//
 
-void MakeBufferBarrierOp::build(Builder *builder, OperationState &state,
+void MakeBufferBarrierOp::build(OpBuilder &builder, OperationState &state,
                                 IREE::HAL::AccessScopeBitfield sourceScope,
                                 IREE::HAL::AccessScopeBitfield targetScope,
                                 Value buffer, Value offset, Value length) {
-  state.addAttribute("source_scope", builder->getI32IntegerAttr(
+  state.addAttribute("source_scope", builder.getI32IntegerAttr(
                                          static_cast<int32_t>(sourceScope)));
-  state.addAttribute("target_scope", builder->getI32IntegerAttr(
+  state.addAttribute("target_scope", builder.getI32IntegerAttr(
                                          static_cast<int32_t>(targetScope)));
   state.addOperands({buffer, offset, length});
-  state.addTypes({BufferBarrierType::get(builder->getContext())});
+  state.addTypes({BufferBarrierType::get(builder.getContext())});
 }
 
 void MakeBufferBarrierOp::getAsmResultNames(
@@ -153,6 +153,10 @@ static ParseResult parseVariableOp(OpAsmParser &parser,
     result->addAttribute("type", TypeAttr::get(type));
   }
 
+  if (failed(parser.parseOptionalAttrDictWithKeyword(result->attributes))) {
+    return failure();
+  }
+
   return success();
 }
 
@@ -174,6 +178,13 @@ static void printVariableOp(OpAsmPrinter &p, VariableOp op) {
     p << " : ";
     p.printType(op.type());
   }
+  p.printOptionalAttrDictWithKeyword(op.getAttrs(), /*elidedAttrs=*/{
+                                         "sym_name",
+                                         "type",
+                                         "is_mutable",
+                                         "initializer",
+                                         "initial_value",
+                                     });
 }
 
 static LogicalResult verifyVariableOp(VariableOp op) {
@@ -209,19 +220,19 @@ static LogicalResult verifyVariableOp(VariableOp op) {
   return success();
 }
 
-void VariableOp::build(Builder *builder, OperationState &result, StringRef name,
-                       bool isMutable, Type type,
+void VariableOp::build(OpBuilder &builder, OperationState &result,
+                       StringRef name, bool isMutable, Type type,
                        Optional<StringRef> initializer,
                        Optional<Attribute> initialValue,
                        ArrayRef<NamedAttribute> attrs) {
   result.addAttribute(SymbolTable::getSymbolAttrName(),
-                      builder->getStringAttr(name));
+                      builder.getStringAttr(name));
   if (isMutable) {
-    result.addAttribute("is_mutable", builder->getUnitAttr());
+    result.addAttribute("is_mutable", builder.getUnitAttr());
   }
   if (initializer.hasValue()) {
     result.addAttribute("initializer",
-                        builder->getSymbolRefAttr(initializer.getValue()));
+                        builder.getSymbolRefAttr(initializer.getValue()));
   } else if (initialValue.hasValue()) {
     result.addAttribute("initial_value", initialValue.getValue());
   }
@@ -229,22 +240,22 @@ void VariableOp::build(Builder *builder, OperationState &result, StringRef name,
   result.attributes.append(attrs.begin(), attrs.end());
 }
 
-void VariableOp::build(Builder *builder, OperationState &result, StringRef name,
-                       bool isMutable, mlir::FuncOp initializer,
+void VariableOp::build(OpBuilder &builder, OperationState &result,
+                       StringRef name, bool isMutable, mlir::FuncOp initializer,
                        ArrayRef<NamedAttribute> attrs) {
   build(builder, result, name, isMutable, initializer.getType().getResult(0),
         initializer.getName(), llvm::None, attrs);
 }
 
-void VariableOp::build(Builder *builder, OperationState &result, StringRef name,
-                       bool isMutable, Type type, Attribute initialValue,
-                       ArrayRef<NamedAttribute> attrs) {
+void VariableOp::build(OpBuilder &builder, OperationState &result,
+                       StringRef name, bool isMutable, Type type,
+                       Attribute initialValue, ArrayRef<NamedAttribute> attrs) {
   build(builder, result, name, isMutable, type, llvm::None, initialValue,
         attrs);
 }
 
-void VariableOp::build(Builder *builder, OperationState &result, StringRef name,
-                       bool isMutable, Type type,
+void VariableOp::build(OpBuilder &builder, OperationState &result,
+                       StringRef name, bool isMutable, Type type,
                        ArrayRef<NamedAttribute> attrs) {
   build(builder, result, name, isMutable, type, llvm::None, llvm::None, attrs);
 }
@@ -326,13 +337,13 @@ static LogicalResult verifyVariableStoreIndirectOp(
 // hal.allocator.compute_size
 //===----------------------------------------------------------------------===//
 
-void AllocatorComputeSizeOp::build(Builder *builder, OperationState &state,
+void AllocatorComputeSizeOp::build(OpBuilder &builder, OperationState &state,
                                    Value allocator, ValueRange shape,
                                    int32_t elementType) {
   state.addOperands({allocator});
   state.addOperands(shape);
-  state.addAttribute("element_type", builder->getI32IntegerAttr(elementType));
-  state.addTypes({builder->getIndexType()});
+  state.addAttribute("element_type", builder.getI32IntegerAttr(elementType));
+  state.addTypes({builder.getIndexType()});
 }
 
 void AllocatorComputeSizeOp::getAsmResultNames(
@@ -344,14 +355,14 @@ void AllocatorComputeSizeOp::getAsmResultNames(
 // hal.allocator.compute_offset
 //===----------------------------------------------------------------------===//
 
-void AllocatorComputeOffsetOp::build(Builder *builder, OperationState &state,
+void AllocatorComputeOffsetOp::build(OpBuilder &builder, OperationState &state,
                                      Value allocator, ValueRange shape,
                                      int32_t elementType, ValueRange indices) {
   state.addOperands({allocator});
   state.addOperands(shape);
-  state.addAttribute("element_type", builder->getI32IntegerAttr(elementType));
+  state.addAttribute("element_type", builder.getI32IntegerAttr(elementType));
   state.addOperands(indices);
-  state.addTypes({builder->getIndexType()});
+  state.addTypes({builder.getIndexType()});
 }
 
 void AllocatorComputeOffsetOp::getAsmResultNames(
@@ -363,16 +374,16 @@ void AllocatorComputeOffsetOp::getAsmResultNames(
 // hal.allocator.compute_range
 //===----------------------------------------------------------------------===//
 
-void AllocatorComputeRangeOp::build(Builder *builder, OperationState &state,
+void AllocatorComputeRangeOp::build(OpBuilder &builder, OperationState &state,
                                     Value allocator, ValueRange shape,
                                     int32_t elementType, ValueRange indices,
                                     ValueRange lengths) {
   state.addOperands({allocator});
   state.addOperands(shape);
-  state.addAttribute("element_type", builder->getI32IntegerAttr(elementType));
+  state.addAttribute("element_type", builder.getI32IntegerAttr(elementType));
   state.addOperands(indices);
   state.addOperands(lengths);
-  state.addTypes({builder->getIndexType(), builder->getIndexType()});
+  state.addTypes({builder.getIndexType(), builder.getIndexType()});
 }
 
 void AllocatorComputeRangeOp::getAsmResultNames(
@@ -385,17 +396,17 @@ void AllocatorComputeRangeOp::getAsmResultNames(
 // hal.allocator.allocate
 //===----------------------------------------------------------------------===//
 
-void AllocatorAllocateOp::build(Builder *builder, OperationState &state,
+void AllocatorAllocateOp::build(OpBuilder &builder, OperationState &state,
                                 Value allocator,
                                 IREE::HAL::MemoryTypeBitfield memoryTypes,
                                 IREE::HAL::BufferUsageBitfield bufferUsage,
                                 Value allocationSize) {
   state.addOperands({allocator, allocationSize});
-  state.addAttribute("memory_types", builder->getI32IntegerAttr(
+  state.addAttribute("memory_types", builder.getI32IntegerAttr(
                                          static_cast<int32_t>(memoryTypes)));
-  state.addAttribute("buffer_usage", builder->getI32IntegerAttr(
+  state.addAttribute("buffer_usage", builder.getI32IntegerAttr(
                                          static_cast<int32_t>(bufferUsage)));
-  state.addTypes({BufferType::get(builder->getContext())});
+  state.addTypes({BufferType::get(builder.getContext())});
 }
 
 void AllocatorAllocateOp::getAsmResultNames(
@@ -407,18 +418,18 @@ void AllocatorAllocateOp::getAsmResultNames(
 // hal.allocator.allocate.const
 //===----------------------------------------------------------------------===//
 
-void AllocatorAllocateConstOp::build(Builder *builder, OperationState &state,
+void AllocatorAllocateConstOp::build(OpBuilder &builder, OperationState &state,
                                      Value allocator,
                                      IREE::HAL::MemoryTypeBitfield memoryTypes,
                                      IREE::HAL::BufferUsageBitfield bufferUsage,
                                      ElementsAttr value) {
   state.addOperands({allocator});
-  state.addAttribute("memory_types", builder->getI32IntegerAttr(
+  state.addAttribute("memory_types", builder.getI32IntegerAttr(
                                          static_cast<int32_t>(memoryTypes)));
-  state.addAttribute("buffer_usage", builder->getI32IntegerAttr(
+  state.addAttribute("buffer_usage", builder.getI32IntegerAttr(
                                          static_cast<int32_t>(bufferUsage)));
   state.addAttribute("value", value);
-  state.addTypes({BufferType::get(builder->getContext())});
+  state.addTypes({BufferType::get(builder.getContext())});
 }
 
 void AllocatorAllocateConstOp::getAsmResultNames(
@@ -430,10 +441,10 @@ void AllocatorAllocateConstOp::getAsmResultNames(
 // hal.buffer.allocator
 //===----------------------------------------------------------------------===//
 
-void BufferAllocatorOp::build(Builder *builder, OperationState &state,
+void BufferAllocatorOp::build(OpBuilder &builder, OperationState &state,
                               Value buffer) {
   state.addOperands({buffer});
-  state.addTypes({AllocatorType::get(builder->getContext())});
+  state.addTypes({AllocatorType::get(builder.getContext())});
 }
 
 void BufferAllocatorOp::getAsmResultNames(
@@ -454,18 +465,18 @@ void BufferSubspanOp::getAsmResultNames(
 // hal.buffer_view.const
 //===----------------------------------------------------------------------===//
 
-void BufferViewConstOp::build(Builder *builder, OperationState &state,
+void BufferViewConstOp::build(OpBuilder &builder, OperationState &state,
                               Value allocator,
                               IREE::HAL::MemoryTypeBitfield memoryTypes,
                               IREE::HAL::BufferUsageBitfield bufferUsage,
                               ElementsAttr value) {
   state.addOperands({allocator});
-  state.addAttribute("memory_types", builder->getI32IntegerAttr(
+  state.addAttribute("memory_types", builder.getI32IntegerAttr(
                                          static_cast<int32_t>(memoryTypes)));
-  state.addAttribute("buffer_usage", builder->getI32IntegerAttr(
+  state.addAttribute("buffer_usage", builder.getI32IntegerAttr(
                                          static_cast<int32_t>(bufferUsage)));
   state.addAttribute("value", value);
-  state.addTypes({BufferViewType::get(builder->getContext())});
+  state.addTypes({BufferViewType::get(builder.getContext())});
 }
 
 void BufferViewConstOp::getAsmResultNames(
@@ -477,13 +488,13 @@ void BufferViewConstOp::getAsmResultNames(
 // hal.buffer_view.create
 //===----------------------------------------------------------------------===//
 
-void BufferViewCreateOp::build(Builder *builder, OperationState &state,
+void BufferViewCreateOp::build(OpBuilder &builder, OperationState &state,
                                Value buffer, ValueRange shape,
                                int32_t elementType) {
   state.addOperands({buffer});
   state.addOperands(shape);
-  state.addAttribute("element_type", builder->getI32IntegerAttr(elementType));
-  state.addTypes({BufferViewType::get(builder->getContext())});
+  state.addAttribute("element_type", builder.getI32IntegerAttr(elementType));
+  state.addTypes({BufferViewType::get(builder.getContext())});
 }
 
 void BufferViewCreateOp::getAsmResultNames(
@@ -504,10 +515,10 @@ void BufferViewSubviewOp::getAsmResultNames(
 // hal.buffer_view.buffer
 //===----------------------------------------------------------------------===//
 
-void BufferViewBufferOp::build(Builder *builder, OperationState &state,
+void BufferViewBufferOp::build(OpBuilder &builder, OperationState &state,
                                Value bufferView) {
   state.addOperands({bufferView});
-  state.addTypes({BufferType::get(builder->getContext())});
+  state.addTypes({BufferType::get(builder.getContext())});
 }
 
 void BufferViewBufferOp::getAsmResultNames(
@@ -519,10 +530,10 @@ void BufferViewBufferOp::getAsmResultNames(
 // hal.buffer_view.byte_length
 //===----------------------------------------------------------------------===//
 
-void BufferViewByteLengthOp::build(Builder *builder, OperationState &state,
+void BufferViewByteLengthOp::build(OpBuilder &builder, OperationState &state,
                                    Value bufferView) {
   state.addOperands({bufferView});
-  state.addTypes({builder->getIndexType()});
+  state.addTypes({builder.getIndexType()});
 }
 
 void BufferViewByteLengthOp::getAsmResultNames(
@@ -534,11 +545,11 @@ void BufferViewByteLengthOp::getAsmResultNames(
 // hal.buffer_view.compute_offset
 //===----------------------------------------------------------------------===//
 
-void BufferViewComputeOffsetOp::build(Builder *builder, OperationState &state,
+void BufferViewComputeOffsetOp::build(OpBuilder &builder, OperationState &state,
                                       Value bufferView, ValueRange indices) {
   state.addOperands({bufferView});
   state.addOperands(indices);
-  state.addTypes({builder->getIndexType()});
+  state.addTypes({builder.getIndexType()});
 }
 
 void BufferViewComputeOffsetOp::getAsmResultNames(
@@ -550,13 +561,13 @@ void BufferViewComputeOffsetOp::getAsmResultNames(
 // hal.buffer_view.compute_range
 //===----------------------------------------------------------------------===//
 
-void BufferViewComputeRangeOp::build(Builder *builder, OperationState &state,
+void BufferViewComputeRangeOp::build(OpBuilder &builder, OperationState &state,
                                      Value bufferView, ValueRange indices,
                                      ValueRange lengths) {
   state.addOperands({bufferView});
   state.addOperands(indices);
   state.addOperands(lengths);
-  state.addTypes({builder->getIndexType(), builder->getIndexType()});
+  state.addTypes({builder.getIndexType(), builder.getIndexType()});
 }
 
 void BufferViewComputeRangeOp::getAsmResultNames(
@@ -570,16 +581,16 @@ void BufferViewComputeRangeOp::getAsmResultNames(
 //===----------------------------------------------------------------------===//
 
 void CommandBufferCreateOp::build(
-    Builder *builder, OperationState &state, Value device,
+    OpBuilder &builder, OperationState &state, Value device,
     IREE::HAL::CommandBufferModeBitfield modes,
     IREE::HAL::CommandCategoryBitfield commandCategories) {
   state.addOperands({device});
   state.addAttribute("modes",
-                     builder->getI32IntegerAttr(static_cast<int32_t>(modes)));
+                     builder.getI32IntegerAttr(static_cast<int32_t>(modes)));
   state.addAttribute(
       "command_categories",
-      builder->getI32IntegerAttr(static_cast<int32_t>(commandCategories)));
-  state.addTypes({CommandBufferType::get(builder->getContext())});
+      builder.getI32IntegerAttr(static_cast<int32_t>(commandCategories)));
+  state.addTypes({CommandBufferType::get(builder.getContext())});
 }
 
 void CommandBufferCreateOp::getAsmResultNames(
@@ -592,22 +603,22 @@ void CommandBufferCreateOp::getAsmResultNames(
 //===----------------------------------------------------------------------===//
 
 void CommandBufferExecutionBarrierOp::build(
-    Builder *builder, OperationState &state, Value commandBuffer,
+    OpBuilder &builder, OperationState &state, Value commandBuffer,
     IREE::HAL::ExecutionStageBitfield sourceStageMask,
     IREE::HAL::ExecutionStageBitfield targetStageMask,
     ValueRange memoryBarriers, ValueRange bufferBarriers) {
   state.addAttribute(
       "source_stage_mask",
-      builder->getI32IntegerAttr(static_cast<int32_t>(sourceStageMask)));
+      builder.getI32IntegerAttr(static_cast<int32_t>(sourceStageMask)));
   state.addAttribute(
       "target_stage_mask",
-      builder->getI32IntegerAttr(static_cast<int32_t>(targetStageMask)));
+      builder.getI32IntegerAttr(static_cast<int32_t>(targetStageMask)));
   state.addOperands(commandBuffer);
   state.addOperands(memoryBarriers);
   state.addOperands(bufferBarriers);
   state.addAttribute("operand_segment_sizes",
                      DenseIntElementsAttr::get(
-                         VectorType::get({3}, builder->getIntegerType(32)),
+                         VectorType::get({3}, builder.getIntegerType(32)),
                          {1, static_cast<int>(memoryBarriers.size()),
                           static_cast<int>(bufferBarriers.size())}));
 }
@@ -698,11 +709,11 @@ static void printCommandBufferExecutionBarrierOp(
 //===----------------------------------------------------------------------===//
 
 void CommandBufferPushDescriptorSetOp::build(
-    Builder *builder, OperationState &state, Value commandBuffer,
+    OpBuilder &builder, OperationState &state, Value commandBuffer,
     Value executableLayout, uint32_t set,
     ArrayRef<DescriptorSetBindingValue> bindings) {
   state.addOperands({commandBuffer, executableLayout});
-  state.addAttribute("set", builder->getI32IntegerAttr(set));
+  state.addAttribute("set", builder.getI32IntegerAttr(set));
   SmallVector<int32_t, 4> bindingOrdinals;
   SmallVector<Value, 4> bindingBuffers;
   SmallVector<Value, 4> bindingOffsets;
@@ -713,7 +724,7 @@ void CommandBufferPushDescriptorSetOp::build(
     bindingOffsets.push_back(std::get<2>(binding));
     bindingLengths.push_back(std::get<3>(binding));
   }
-  state.addAttribute("bindings", builder->getI32ArrayAttr(bindingOrdinals));
+  state.addAttribute("bindings", builder.getI32ArrayAttr(bindingOrdinals));
   state.addOperands(bindingBuffers);
   state.addOperands(bindingOffsets);
   state.addOperands(bindingLengths);
@@ -726,7 +737,7 @@ static ParseResult parseDescriptorSetBindings(OpAsmParser &parser,
   SmallVector<Attribute, 4> bindingAttrs;
   do {
     IntegerAttr bindingAttr;
-    SmallVector<NamedAttribute, 1> attrList;
+    NamedAttrList attrList;
     OpAsmParser::OperandType buffer;
     OpAsmParser::OperandType bufferOffset;
     OpAsmParser::OperandType bufferLength;
@@ -824,7 +835,7 @@ static void printCommandBufferPushDescriptorSetOp(
 // hal.command_buffer.bind_descriptor_set
 //===----------------------------------------------------------------------===//
 
-void CommandBufferBindDescriptorSetOp::build(Builder *builder,
+void CommandBufferBindDescriptorSetOp::build(OpBuilder &builder,
                                              OperationState &state,
                                              Value commandBuffer,
                                              Value executableLayout,
@@ -832,7 +843,7 @@ void CommandBufferBindDescriptorSetOp::build(Builder *builder,
                                              ValueRange dynamicOffsets) {
   state.addOperands({commandBuffer, executableLayout, descriptorSet});
   state.addAttribute("set",
-                     builder->getIntegerAttr(builder->getIntegerType(32), set));
+                     builder.getIntegerAttr(builder.getIntegerType(32), set));
   state.addOperands(dynamicOffsets);
 }
 
@@ -841,14 +852,14 @@ void CommandBufferBindDescriptorSetOp::build(Builder *builder,
 //===----------------------------------------------------------------------===//
 
 void CommandBufferDispatchOp::build(
-    Builder *builder, OperationState &state, Value commandBuffer,
+    OpBuilder &builder, OperationState &state, Value commandBuffer,
     Value executable, IREE::HAL::ExecutableEntryPointOp entryPoint,
     Value workgroupX, Value workgroupY, Value workgroupZ) {
   state.addOperands(
       {commandBuffer, executable, workgroupX, workgroupY, workgroupZ});
-  state.addAttribute("entry_point",
-                     builder->getIntegerAttr(builder->getIntegerType(32),
-                                             entryPoint.ordinal()));
+  state.addAttribute(
+      "entry_point",
+      builder.getIntegerAttr(builder.getIntegerType(32), entryPoint.ordinal()));
 }
 
 //===----------------------------------------------------------------------===//
@@ -856,7 +867,7 @@ void CommandBufferDispatchOp::build(
 //===----------------------------------------------------------------------===//
 
 void DescriptorSetCreateOp::build(
-    Builder *builder, OperationState &state, Value device, Value setLayout,
+    OpBuilder &builder, OperationState &state, Value device, Value setLayout,
     ArrayRef<DescriptorSetBindingValue> bindings) {
   state.addOperands({device, setLayout});
   SmallVector<int32_t, 4> bindingOrdinals;
@@ -869,7 +880,7 @@ void DescriptorSetCreateOp::build(
     bindingOffsets.push_back(std::get<2>(binding));
     bindingLengths.push_back(std::get<3>(binding));
   }
-  state.addAttribute("bindings", builder->getI32ArrayAttr(bindingOrdinals));
+  state.addAttribute("bindings", builder.getI32ArrayAttr(bindingOrdinals));
   state.addOperands(bindingBuffers);
   state.addOperands(bindingOffsets);
   state.addOperands(bindingLengths);
@@ -952,20 +963,19 @@ void DeviceAllocatorOp::getAsmResultNames(
 // hal.device.switch
 //===----------------------------------------------------------------------===//
 
-void DeviceSwitchOp::build(Builder *builder, OperationState &state,
+void DeviceSwitchOp::build(OpBuilder &builder, OperationState &state,
                            TypeRange resultTypes, Value device,
                            ArrayRef<Attribute> conditions,
                            ArrayRef<ValueRange> conditionArgs,
                            ArrayRef<NamedAttribute> attributes) {
   state.addOperands({device});
-  state.addAttribute("conditions", builder->getArrayAttr(conditions));
+  state.addAttribute("conditions", builder.getArrayAttr(conditions));
   for (auto args : conditionArgs) {
     state.addOperands(args);
     state.addRegion();
   }
   state.addTypes(resultTypes);
   state.addAttributes(attributes);
-  state.resizableOperandList = true;
 }
 
 static ParseResult parseDeviceSwitchOp(OpAsmParser &parser,
@@ -984,11 +994,10 @@ static ParseResult parseDeviceSwitchOp(OpAsmParser &parser,
   // #hal.device.match.id<"vulkan-v1.?-*">(%c1a = %c1 : i32) {
   //   hal.return %c1a : i32
   // }, ...
-  result->setOperandListToResizable();
   SmallVector<Attribute, 4> conditionAttrs;
   do {
     Attribute conditionAttr;
-    SmallVector<NamedAttribute, 1> dummyAttrs;
+    NamedAttrList dummyAttrs;
     if (failed(parser.parseAttribute(conditionAttr, "condition", dummyAttrs)) ||
         failed(parser.parseLParen())) {
       return failure();
@@ -1124,11 +1133,11 @@ InterfaceOp ExecutableOp::getInterfaceOp() {
   return interfaceOps.front();
 }
 
-void ExecutableOp::build(Builder *builder, OperationState &state,
+void ExecutableOp::build(OpBuilder &builder, OperationState &state,
                          StringRef name) {
-  ensureTerminator(*state.addRegion(), *builder, state.location);
+  ensureTerminator(*state.addRegion(), builder, state.location);
   state.addAttribute(mlir::SymbolTable::getSymbolAttrName(),
-                     builder->getStringAttr(name));
+                     builder.getStringAttr(name));
 }
 
 static ParseResult parseExecutableOp(OpAsmParser &parser,
@@ -1195,10 +1204,10 @@ static void printExecutableEntryPointOp(OpAsmPrinter &p,
 // hal.executable.target
 //===----------------------------------------------------------------------===//
 
-void ExecutableTargetOp::build(Builder *builder, OperationState &state,
+void ExecutableTargetOp::build(OpBuilder &builder, OperationState &state,
                                StringRef targetBackend) {
-  ensureTerminator(*state.addRegion(), *builder, state.location);
-  state.addAttribute("target_backend", builder->getStringAttr(targetBackend));
+  ensureTerminator(*state.addRegion(), builder, state.location);
+  state.addAttribute("target_backend", builder.getStringAttr(targetBackend));
 }
 
 static ParseResult parseExecutableTargetOp(OpAsmParser &parser,
@@ -1233,15 +1242,15 @@ static void printExecutableTargetOp(OpAsmPrinter &p, ExecutableTargetOp op) {
 // hal.executable.binary
 //===----------------------------------------------------------------------===//
 
-void ExecutableBinaryOp::build(Builder *builder, OperationState &state,
+void ExecutableBinaryOp::build(OpBuilder &builder, OperationState &state,
                                uint32_t format, std::vector<uint8_t> data) {
-  ensureTerminator(*state.addRegion(), *builder, state.location);
+  ensureTerminator(*state.addRegion(), builder, state.location);
   state.addAttribute(
-      "format", builder->getIntegerAttr(builder->getIntegerType(32), format));
+      "format", builder.getIntegerAttr(builder.getIntegerType(32), format));
   state.addAttribute("data",
                      DenseIntElementsAttr::get(
                          VectorType::get({static_cast<int64_t>(data.size())},
-                                         builder->getIntegerType(8)),
+                                         builder.getIntegerType(8)),
                          data));
 }
 
@@ -1294,11 +1303,11 @@ void ExecutableLookupOp::getAsmResultNames(
 // hal.interface
 //===----------------------------------------------------------------------===//
 
-void InterfaceOp::build(Builder *builder, OperationState &state, StringRef name,
-                        IntegerAttr pushConstants) {
-  ensureTerminator(*state.addRegion(), *builder, state.location);
+void InterfaceOp::build(OpBuilder &builder, OperationState &state,
+                        StringRef name, IntegerAttr pushConstants) {
+  ensureTerminator(*state.addRegion(), builder, state.location);
   state.addAttribute(mlir::SymbolTable::getSymbolAttrName(),
-                     builder->getStringAttr(name));
+                     builder.getStringAttr(name));
   if (pushConstants) {
     state.addAttribute("push_constants", pushConstants);
   }

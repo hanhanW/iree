@@ -25,5 +25,12 @@ void addHLOToLinalgOnBuffersPasses(OpPassManager &pm) {
   pm.addPass(createHLOToLinalgOnBuffersPass());
 }
 
+static PassPipelineRegistration<> hloToLinalgOnBuffersPipeline(
+    "iree-codegen-hlo-to-linalg-pipeline",
+    "Runs the progressive lowering pipeline from XLA HLO to Linalg on buffers",
+    [](OpPassManager &passManager) {
+      addHLOToLinalgOnBuffersPasses(passManager);
+    });
+
 }  // namespace iree_compiler
 }  // namespace mlir

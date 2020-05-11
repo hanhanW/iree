@@ -33,7 +33,6 @@ package(
 COMPILER_DEPS = [
     # Transforms.
     "//iree/compiler/Dialect/Flow/Transforms",
-    "//iree/compiler/Dialect/Modules/TensorList/IR:TensorListDialect",
     "//iree/compiler/Dialect/HAL/Target",
     "//iree/compiler/Dialect/HAL/Transforms",
     "//iree/compiler/Dialect/Shape/IR",
@@ -44,6 +43,7 @@ COMPILER_DEPS = [
     "//iree/compiler/Dialect/HAL/Target/VMLA",
     "//iree/compiler/Dialect/HAL/Target/LLVM",
     "//iree/compiler/Dialect/HAL/Target/VulkanSPIRV",
+    "//iree/compiler/Dialect/VM/Target:init_targets",
     "//iree/compiler/Dialect/VM/Target/Bytecode",
 ]
 
@@ -53,7 +53,6 @@ iree_py_library(
         "__init__.py",
     ],
     srcs_version = "PY3",
-    tags = ["nokokoro"],
     deps = [
         ":binding",
         "//bindings/python:pathsetup",  # build_cleaner: keep
@@ -68,7 +67,6 @@ iree_py_extension(
     copts = PYBIND_COPTS + PYBIND_EXTENSION_COPTS,
     features = PYBIND_FEATURES,
     linkstatic = 1,
-    tags = ["nokokoro"],
     win_def_file = "export.def",
     deps = [
         ":compiler_library",
@@ -85,15 +83,15 @@ pybind_cc_library(
         "compiler.h",
     ],
     copts = PYBIND_REGISTER_MLIR_PASSES,
-    tags = ["nokokoro"],
     deps = COMPILER_DEPS + [
         "//bindings/python/pyiree/common",
+        "//iree/tools:init_compiler_modules",
         "//iree/tools:init_passes_and_dialects",
         "//iree/tools:init_targets",
         "@llvm-project//llvm:support",
         "@llvm-project//mlir:AllPassesAndDialectsNoRegistration",
         "@llvm-project//mlir:IR",
-        "@llvm-project//mlir:LoopOpsTransforms",
+        "@llvm-project//mlir:SCFTransforms",
         "@llvm-project//mlir:Parser",
         "@llvm-project//mlir:Pass",
     ],

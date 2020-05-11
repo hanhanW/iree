@@ -53,10 +53,12 @@
 #include "iree/compiler/Dialect/IREE/Transforms/Passes.h"
 #include "iree/compiler/Dialect/VM/Target/Bytecode/BytecodeModuleTarget.h"
 #include "iree/compiler/Dialect/VM/Target/Bytecode/TranslationFlags.h"
+#include "iree/compiler/Dialect/VM/Target/init_targets.h"
 #include "iree/compiler/Dialect/VM/Transforms/Passes.h"
 #include "iree/compiler/Translation/IREEVM.h"
 #include "iree/hal/api.h"
 #include "iree/modules/hal/hal_module.h"
+#include "iree/tools/init_compiler_modules.h"
 #include "iree/tools/init_dialects.h"
 #include "iree/tools/init_targets.h"
 #include "iree/tools/vm_util.h"
@@ -175,6 +177,10 @@ StatusOr<std::string> PrepareModule(
   source_mgr.AddNewSourceBuffer(std::move(file_buffer), llvm::SMLoc());
   mlir::OwningModuleRef mlir_module =
       mlir::parseSourceFile(source_mgr, &context);
+  if (!mlir_module) {
+    return FailedPreconditionErrorBuilder(IREE_LOC)
+           << "Could not parse MLIR file.";
+  }
 
   if (export_all_flag) {
     for (auto function : mlir_module->getOps<mlir::FuncOp>()) {
@@ -459,7 +465,9 @@ extern "C" int main(int argc, char** argv) {
 
   mlir::registerMlirDialects();
   mlir::iree_compiler::registerIreeDialects();
+  mlir::iree_compiler::registerIreeCompilerModuleDialects();
   mlir::iree_compiler::registerHALTargetBackends();
+  mlir::iree_compiler::registerVMTargets();
 
   // Register MLIRContext command-line options like
   // -mlir-print-op-on-diagnostic.

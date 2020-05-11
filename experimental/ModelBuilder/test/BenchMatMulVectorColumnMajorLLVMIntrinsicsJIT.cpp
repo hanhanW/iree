@@ -24,9 +24,9 @@ static SmallVector<AffineMap, 3> makeColumnMajorMatmulMaps(ModelBuilder &mb) {
   AffineExpr m, n, k;
   bindDims(mb.getContext(), m, n, k);
   SmallVector<AffineMap, 3> results;
-  results.push_back(AffineMap::get(3, 0, {k, n}));
-  results.push_back(AffineMap::get(3, 0, {m, k}));
-  results.push_back(AffineMap::get(3, 0, {n, m}));
+  results.push_back(AffineMap::get(3, 0, {k, n}, mb.getContext()));
+  results.push_back(AffineMap::get(3, 0, {m, k}, mb.getContext()));
+  results.push_back(AffineMap::get(3, 0, {n, m}, mb.getContext()));
   return results;
 }
 
@@ -43,13 +43,9 @@ void buildMatMat(ModelBuilder &mb, StringLiteral fn) {
   auto mnVectorType = mb.getVectorType({M, N}, f32);
   auto typeC = mb.getMemRefType({}, mnVectorType);
 
-  auto f = mb.makeFunction(fn, {}, {typeA, typeB, typeC});
-  MLIRContext *context = f32.getContext();
-  auto preferAttr = StringAttr::get("prefer-vector-width", context);
-  auto _512Attr = StringAttr::get("512", context);
-  f.setAttr("passthrough",
-            ArrayAttr::get({ArrayAttr::get({preferAttr, _512Attr}, context)},
-                           context));
+  auto f = mb.makeFunction(
+      fn, {}, {typeA, typeB, typeC},
+      MLIRFuncOpConfig().setEmitCInterface(true).setPreferAvx512(true));
   OpBuilder b(&f.getBody());
   ScopedContext scope(b, f.getLoc());
 
@@ -68,11 +64,11 @@ void buildMatMat(ModelBuilder &mb, StringLiteral fn) {
 
   // Loop ITERS times over the kernel to reduce the JIT's overhead.
   StdIndexedValue A(f.getArgument(0)), B(f.getArgument(1)), C(f.getArgument(2));
-  ValueHandle i(mb.getIndexType());
+  Value i;
   LoopNestBuilder(&i, std_constant_index(0), std_constant_index(ITERS),
                   std_constant_index(1))([&] {
     // Compute C += A x B, in column-major form, with LLVM matrix intrinsics.
-    C() = (vector_contract(*A(), *B(), *C(), mb.getAffineMapArrayAttr(accesses),
+    C() = (vector_contract(A(), B(), C(), mb.getAffineMapArrayAttr(accesses),
                            mb.getArrayAttr(iterator_types)));
   });
   std_ret();

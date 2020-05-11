@@ -20,38 +20,24 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-gentbl(
-    name = "LinalgVectorTransformPatternsIncGen",
-    tbl_outs = [
-        (
-            "-gen-rewriters",
-            "LinalgVectorTransformPatterns.h.inc",
-        ),
-    ],
-    tblgen = "@llvm-project//mlir:mlir-tblgen",
-    td_file = "LinalgVectorTransformPatterns.td",
-    td_srcs = [
-        "@llvm-project//mlir:LinalgTransformPatternsTdFiles",
-    ],
-)
-
 cc_library(
     name = "CodegenPasses",
     srcs = [
-        "HALInterfaceToMemrefPass.cpp",
+        "DecomposeHLOClamp.cpp",
         "HLOToLinalgOnBuffers.cpp",
         "HLOToLinalgOnTensors.cpp",
         "LinalgFusion.cpp",
-        "LinalgVectorTransform.cpp",
         "Passes.cpp",
+        "ResolveShapeOps.cpp",
     ],
     hdrs = [
         "Passes.h",
     ],
     deps = [
-        ":LinalgVectorTransformPatternsIncGen",
         "//iree/compiler/Dialect/HAL/IR",
+        "//iree/compiler/Dialect/HAL/IR:HALDialect",
         "//iree/compiler/Dialect/IREE/IR",
+        "//iree/compiler/Dialect/Shape/IR",
         "//iree/compiler/Translation/CodegenUtils",
         "@llvm-project//llvm:support",
         "@llvm-project//mlir:IR",
@@ -65,5 +51,4 @@ cc_library(
         "@org_tensorflow//tensorflow/compiler/mlir/xla:hlo",
         "@org_tensorflow//tensorflow/compiler/mlir/xla:map_xla_to_scalar_op",
     ],
-    alwayslink = 1,
 )

@@ -23,12 +23,6 @@ iree_select_compiler_opts(IREE_HAL_DRIVER_MODULES
     "iree::hal::vulkan::vulkan_driver_module"
 )
 
-set(IREE_COMPILER_DIALECT_MODULES
-  "iree::compiler::Dialect::Modules::Check::IR::CheckDialect"
-  "iree::compiler::Dialect::Modules::Strings::IR::Dialect"
-  "iree::compiler::Dialect::Modules::TensorList::IR::TensorListDialect"
-)
-
 iree_cc_binary(
   NAME
     iree-benchmark-module
@@ -116,7 +110,7 @@ if(${IREE_BUILD_COMPILER})
       "init_dialects.h"
       "init_passes.h"
     DEPS
-      MLIRAffine
+      MLIRAffineOps
       MLIRAffineTransforms
       MLIRGPU
       MLIRGPUtoSPIRVTransforms
@@ -137,19 +131,34 @@ if(${IREE_BUILD_COMPILER})
       MLIRStandardToSPIRVTransforms
       MLIRTransforms
       MLIRVector
+      iree::compiler::Dialect::Flow::Analysis
       iree::compiler::Dialect::Flow::IR
       iree::compiler::Dialect::Flow::Transforms
       iree::compiler::Dialect::HAL::IR::HALDialect
+      iree::compiler::Dialect::HAL::Transforms
       iree::compiler::Dialect::IREE::IR
       iree::compiler::Dialect::IREE::Transforms
+      iree::compiler::Dialect::Shape::Conversion
       iree::compiler::Dialect::Shape::IR
       iree::compiler::Dialect::Shape::Transforms
+      iree::compiler::Dialect::VM::Analysis
       iree::compiler::Dialect::VM::IR
       iree::compiler::Dialect::VM::Transforms
       iree::compiler::Dialect::VMLA::IR::VMLADialect
       iree::compiler::Dialect::VMLA::Transforms
       iree::compiler::Dialect::Vulkan::IR
     PUBLIC
+  )
+
+  iree_cc_library(
+    NAME
+      init_compiler_modules
+    HDRS
+      "init_compiler_modules.h"
+    DEPS
+      iree::compiler::Dialect::Modules::Check::IR::CheckDialect
+      iree::compiler::Dialect::Modules::Strings::IR::Dialect
+      iree::compiler::Dialect::Modules::TensorList::IR::TensorListDialect
   )
 
   iree_cc_library(
@@ -161,6 +170,16 @@ if(${IREE_BUILD_COMPILER})
       iree::compiler::Dialect::HAL::Target::LLVM
       iree::compiler::Dialect::HAL::Target::VMLA
       iree::compiler::Dialect::HAL::Target::VulkanSPIRV
+    PUBLIC
+  )
+
+  iree_cc_library(
+    NAME
+      init_xla_dialects
+    HDRS
+      "init_xla_dialects.h"
+    DEPS
+      tensorflow::mlir_xla
     PUBLIC
   )
 
@@ -179,8 +198,10 @@ if(${IREE_BUILD_COMPILER})
     SRCS
       "opt_main.cc"
     DEPS
+      ::init_compiler_modules
       ::init_passes_and_dialects
       ::init_targets
+      ::init_xla_dialects
       LLVMSupport
       MLIRIR
       MLIROptLib
@@ -205,11 +226,9 @@ if(${IREE_BUILD_COMPILER})
       iree::compiler::Dialect::VMLA::Transforms
       iree::compiler::Dialect::Vulkan::IR
       iree::compiler::Translation::IREEVM
-      iree::compiler::Translation::SPIRV::LinalgToSPIRV
-      iree::compiler::Translation::SPIRV::XLAToSPIRV
+      iree::compiler::Translation::SPIRV::init_translations
       iree::compiler::Translation::CodegenPasses
       tensorflow::mlir_xla
-      ${IREE_COMPILER_DIALECT_MODULES}
     PUBLIC
   )
 
@@ -230,6 +249,7 @@ if(${IREE_BUILD_COMPILER})
     SRCS
       "run_mlir_main.cc"
     DEPS
+      ::init_compiler_modules
       ::init_passes_and_dialects
       ::init_targets
       ::vm_util
@@ -251,6 +271,7 @@ if(${IREE_BUILD_COMPILER})
       iree::compiler::Dialect::HAL::Transforms
       iree::compiler::Dialect::IREE::Transforms
       iree::compiler::Dialect::VM::Target::Bytecode
+      iree::compiler::Dialect::VM::Target::init_targets
       iree::compiler::Dialect::VM::Transforms
       iree::compiler::Translation::IREEVM
       iree::hal::api
@@ -258,7 +279,6 @@ if(${IREE_BUILD_COMPILER})
       iree::vm
       iree::vm::bytecode_module
       iree::vm::value
-      ${IREE_COMPILER_DIALECT_MODULES}
       ${IREE_HAL_DRIVER_MODULES}
   )
 
@@ -268,9 +288,11 @@ if(${IREE_BUILD_COMPILER})
     SRCS
       "translate_main.cc"
     DEPS
+      ::init_compiler_modules
       ::init_passes_and_dialects
       ::init_targets
       ::init_translations
+      ::init_xla_dialects
       LLVMSupport
       MLIRIR
       MLIRLoopOpsTransforms
@@ -278,11 +300,9 @@ if(${IREE_BUILD_COMPILER})
       MLIRSupport
       MLIRTranslation
       iree::compiler::Dialect::VM::Target::Bytecode
+      iree::compiler::Dialect::VM::Target::init_targets
       iree::compiler::Translation::IREEVM
-      iree::compiler::Translation::SPIRV::XLAToSPIRV
-      tensorflow::mlir_xla
-      ${IREE_COMPILER_DIALECT_MODULES}
-    ALWAYSLINK
+      iree::compiler::Translation::SPIRV::init_translations
     PUBLIC
   )
 
@@ -338,10 +358,12 @@ iree_cc_test(
     iree::vm::variant_list
 )
 
-add_custom_target(IreeFileCheck ALL
-  COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_CURRENT_SOURCE_DIR}/IreeFileCheck.sh IreeFileCheck
-)
-add_custom_target(LLVMFileCheck ALL
-  COMMAND ${CMAKE_COMMAND} -E create_symlink $<TARGET_FILE:FileCheck> FileCheck
-  DEPENDS FileCheck
-)
+if(${IREE_ENABLE_LLVM})
+  add_custom_target(IreeFileCheck ALL
+    COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_CURRENT_SOURCE_DIR}/IreeFileCheck.sh IreeFileCheck
+  )
+  add_custom_target(LLVMFileCheck ALL
+    COMMAND ${CMAKE_COMMAND} -E create_symlink $<TARGET_FILE:FileCheck> FileCheck
+    DEPENDS FileCheck
+  )
+endif()

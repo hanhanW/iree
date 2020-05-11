@@ -23,6 +23,13 @@ the list of available backends).
 ## Running tests
 
 ```shell
+# For locally running tests and iterating on backend development,
+# `bazel run` is preferred.
+bazel run :math_test -- --override_backends=iree_vulkan
+
+# Same as above, but add `tf` backend to cross-check numerical correctness.
+bazel run :math_test -- --override_backends=tf,iree_vulkan
+
 # Run all tests with defaults and output on failure.
 bazel test ... --test_output=errors
 
@@ -30,13 +37,22 @@ bazel test ... --test_output=errors
 bazel test simple_arithmetic_test --test_output=streamed
 
 # Run tests with an altered list of backends.
-bazel test ... --test_output=errors -- \
-    --override_backends=tf,iree_vmla,iree_vulkan
+bazel test ... --test_output=errors \
+    --test_arg=--override_backends=tf,iree_vmla,iree_vulkan
 
 # (alternative) Run tests with an altered list of backends.
 bazel test ... --test_env=IREE_OVERRIDE_BACKENDS=tf,iree_vmla,iree_vulkan \
     --test_output=errors
 ```
+
+If you specify the same backend multiple times, for example
+--override_backends=iree_vmla,iree_vmla. The same backends are grouped and in
+this example iree_vmla will run once. If you specify tf,iree_vmla as backends,
+then we will test both backends and compare them with each other. If you specify
+tf backend only, then we will also test tf vs tf to capture any model
+initialization/randomization issues (it is a special case for debug purpose).
+For reproducibility of the unit tests we set random seed of tf and numpy by
+calling tf_test_utils.set_random_seed() before model creation.
 
 ## Debugging tests
 

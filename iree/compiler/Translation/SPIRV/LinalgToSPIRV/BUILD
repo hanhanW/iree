@@ -21,6 +21,7 @@ cc_library(
     name = "LinalgToSPIRV",
     srcs = [
         "ConvertToGPUPass.cpp",
+        "ConvertToSPIRVPass.cpp",
         "LinalgTileAndFusePass.cpp",
         "LowerToSPIRV.cpp",
     ],
@@ -29,7 +30,9 @@ cc_library(
         "Passes.h",
     ],
     deps = [
+        "//iree/compiler/Dialect/HAL/IR",
         "//iree/compiler/Dialect/IREE/IR",
+        "//iree/compiler/Dialect/Shape/Transforms",
         "//iree/compiler/Translation/CodegenPasses",
         "//iree/compiler/Translation/CodegenUtils",
         "@llvm-project//llvm:support",
@@ -42,9 +45,9 @@ cc_library(
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:LinalgOps",
         "@llvm-project//mlir:LinalgTransforms",
-        "@llvm-project//mlir:LoopOps",
         "@llvm-project//mlir:LoopsToGPUPass",
         "@llvm-project//mlir:Pass",
+        "@llvm-project//mlir:SCFDialect",
         "@llvm-project//mlir:SPIRVDialect",
         "@llvm-project//mlir:SPIRVLowering",
         "@llvm-project//mlir:StandardOps",
@@ -54,5 +57,4 @@ cc_library(
         "@org_tensorflow//tensorflow/compiler/mlir/xla:hlo",
         "@org_tensorflow//tensorflow/compiler/mlir/xla:xla_legalize_to_linalg",
     ],
-    alwayslink = 1,
 )

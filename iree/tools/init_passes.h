@@ -22,9 +22,13 @@
 
 #include <cstdlib>
 
+#include "iree/compiler/Dialect/Flow/Analysis/TestPasses.h"
 #include "iree/compiler/Dialect/Flow/Transforms/Passes.h"
+#include "iree/compiler/Dialect/HAL/Transforms/Passes.h"
 #include "iree/compiler/Dialect/IREE/Transforms/Passes.h"
+#include "iree/compiler/Dialect/Shape/Conversion/Passes.h"
 #include "iree/compiler/Dialect/Shape/Transforms/Passes.h"
+#include "iree/compiler/Dialect/VM/Analysis/TestPasses.h"
 #include "iree/compiler/Dialect/VM/Transforms/Passes.h"
 #include "iree/compiler/Dialect/VMLA/Transforms/Passes.h"
 #include "mlir/Conversion/GPUToSPIRV/ConvertGPUToSPIRVPass.h"
@@ -35,8 +39,8 @@
 #include "mlir/Dialect/Affine/Passes.h"
 #include "mlir/Dialect/GPU/Passes.h"
 #include "mlir/Dialect/Linalg/Passes.h"
-#include "mlir/Dialect/LoopOps/Passes.h"
 #include "mlir/Dialect/Quant/Passes.h"
+#include "mlir/Dialect/SCF/Passes.h"
 #include "mlir/Dialect/SPIRV/Passes.h"
 #include "mlir/Transforms/LocationSnapshot.h"
 #include "mlir/Transforms/Passes.h"
@@ -169,10 +173,13 @@ namespace iree_compiler {
 // global registry.
 inline void registerAllIreePasses() {
   IREE::Flow::registerFlowPasses();
-  // TODO: register HAL passes
+  IREE::Flow::registerFlowAnalysisTestPasses();
+  IREE::HAL::registerHALPasses();
   IREE::registerIreePasses();
+  Shape::registerShapeConversionPasses();
   Shape::registerShapePasses();
   IREE::VM::registerVMPasses();
+  IREE::VM::registerVMAnalysisTestPasses();
   IREE::VM::registerVMTestPasses();
   IREE::VMLA::registerVMLAPasses();
 }

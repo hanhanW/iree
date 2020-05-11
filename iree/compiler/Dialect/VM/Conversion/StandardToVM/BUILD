@@ -7,7 +7,7 @@ cc_library(
     name = "StandardToVM",
     srcs = [
         "ConvertStandardToVM.cpp",
-        "ConvertStandardToVMPass.cpp",
+        "ConvertStandardToVMTest.cpp",
     ],
     hdrs = [
         "ConvertStandardToVM.h",
@@ -22,5 +22,4 @@ cc_library(
         "@llvm-project//mlir:TransformUtils",
         "@llvm-project//mlir:Transforms",
     ],
-    alwayslink = 1,
 )

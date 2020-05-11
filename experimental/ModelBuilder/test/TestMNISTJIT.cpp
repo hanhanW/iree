@@ -47,7 +47,9 @@ void buildMNIST(ModelBuilder &modelBuilder, StringLiteral funcName, unsigned B,
   auto f32 = modelBuilder.f32;
   auto inputType = modelBuilder.getMemRefType({-1, W0}, f32);
   auto outputType = modelBuilder.getMemRefType({-1, W3}, f32);
-  auto func = modelBuilder.makeFunction(funcName, {}, {inputType, outputType});
+  auto func =
+      modelBuilder.makeFunction(funcName, {}, {inputType, outputType},
+                                MLIRFuncOpConfig().setEmitCInterface(true));
 
   // Fill the body (3 blocks of FCBiasTanh), alloc everything manually atm.
   OpBuilder b(&func.getBody());
@@ -66,16 +68,16 @@ void buildMNIST(ModelBuilder &modelBuilder, StringLiteral funcName, unsigned B,
       std_alloc(modelBuilder.getMemRefType({-1, W2}, f32), batchSize);
   Value outputBlock3 = func.getArgument(1);
 
-  ValueHandle zero(modelBuilder.constant_f32(0.0f));
-  ValueHandle someVal(modelBuilder.constant_f32(0.1123f));
+  Value flt_0 = modelBuilder.constant_f32(0.0f);
+  Value someVal = modelBuilder.constant_f32(0.1123f);
   linalg_fill(h1Weights, someVal);
   linalg_fill(h2Weights, someVal);
   linalg_fill(h3Weights, someVal);
   linalg_fill(bias1, someVal);
   linalg_fill(bias2, someVal);
   linalg_fill(bias3, someVal);
-  linalg_fill(outputBlock1, zero);
-  linalg_fill(outputBlock2, zero);
+  linalg_fill(outputBlock1, flt_0);
+  linalg_fill(outputBlock2, flt_0);
 
   modelBuilder.FCBiasTanh({input, h1Weights, outputBlock1}, bias1);
   modelBuilder.FCBiasTanh({outputBlock1, h2Weights, outputBlock2}, bias2);

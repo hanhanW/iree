@@ -176,12 +176,25 @@ void buildFlowTransformPassPipeline(OpPassManager &passManager) {
   //   - Full formation of dispatch regions
   //----------------------------------------------------------------------------
   // Form streams.
+  // Cleanup the IR before we try to form streams.
+  passManager.addNestedPass<FuncOp>(createCanonicalizerPass());
+  passManager.addNestedPass<FuncOp>(createCSEPass());
+
+  // Reorder blocks to increase the grouping of streamable ops.
+  passManager.addNestedPass<FuncOp>(createHoistUnstreamableOpsPass());
+  // The hoisting pass does some reordering. Canonicalize to avoid unnecessary
+  // arbitrary ordering.
+  passManager.addNestedPass<FuncOp>(createCanonicalizerPass());
+
   passManager.addPass(IREE::Flow::createFormStreamsPass());
   // Forming streams involves a fair amount of subgraph stitching, which can
   // cause duplication. Run CSE to collapse.
+  passManager.addNestedPass<FuncOp>(createCanonicalizerPass());
   passManager.addNestedPass<FuncOp>(createCSEPass());
 
-  // TODO(benvanik): run symbol DCE pass.
+  // Symbol DCE any remaining variables/functions that are now no longer
+  // required.
+  passManager.addPass(createSymbolDCEPass());
 }
 
 static PassPipelineRegistration<> transformPassPipeline(

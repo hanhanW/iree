@@ -20,14 +20,13 @@ package(
 cc_library(
     name = "Transforms",
     srcs = [
+        "InlineDeviceSwitches.cpp",
         "LinkExecutables.cpp",
         "MaterializeInterfaces.cpp",
         "MaterializeResourceCaches.cpp",
         "MemoizeDeviceQueries.cpp",
-        "OutlineDeviceSwitches.cpp",
         "Passes.cpp",
         "PublicAbiGeneration.cpp",
-        "RewriteLegacyIO.cpp",
         "SerializeExecutables.cpp",
         "TranslateExecutables.cpp",
     ],
@@ -52,5 +51,4 @@ cc_library(
         "@llvm-project//mlir:Transforms",
         "@org_tensorflow//tensorflow/compiler/mlir/xla:hlo",
     ],
-    alwayslink = 1,
 )

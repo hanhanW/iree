@@ -23,7 +23,9 @@
 #include "iree/compiler/Dialect/HAL/Target/TargetRegistry.h"
 #include "iree/compiler/Dialect/HAL/Transforms/Passes.h"
 #include "iree/compiler/Dialect/VM/Target/Bytecode/BytecodeModuleTarget.h"
+#include "iree/compiler/Dialect/VM/Target/init_targets.h"
 #include "iree/compiler/Dialect/VM/Transforms/Passes.h"
+#include "iree/tools/init_compiler_modules.h"
 #include "iree/tools/init_dialects.h"
 #include "iree/tools/init_passes.h"
 #include "iree/tools/init_targets.h"
@@ -71,9 +73,11 @@ bool LLVMOnceInit() {
   // Register built-in MLIR dialects.
   mlir::registerMlirDialects();
 
-  // Register IREE dialects and HAL target backends.
+  // Register IREE dialects, compiler module dialects, and HAL target backends.
   mlir::iree_compiler::registerIreeDialects();
+  mlir::iree_compiler::registerIreeCompilerModuleDialects();
   mlir::iree_compiler::registerHALTargetBackends();
+  mlir::iree_compiler::registerVMTargets();
 
   // Depending on the build environment the MLIR Passes may already be
   // registered. Conditionally register passes until re-registration is

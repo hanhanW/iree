@@ -68,10 +68,11 @@ static void printModuleOp(OpAsmPrinter &p, ModuleOp &op) {
                 /*printBlockTerminators=*/false);
 }
 
-void ModuleOp::build(Builder *builder, OperationState &result, StringRef name) {
-  ensureTerminator(*result.addRegion(), *builder, result.location);
-  result.attributes.push_back(builder->getNamedAttr(
-      mlir::SymbolTable::getSymbolAttrName(), builder->getStringAttr(name)));
+void ModuleOp::build(OpBuilder &builder, OperationState &result,
+                     StringRef name) {
+  ensureTerminator(*result.addRegion(), builder, result.location);
+  result.attributes.push_back(builder.getNamedAttr(
+      mlir::SymbolTable::getSymbolAttrName(), builder.getStringAttr(name)));
 }
 
 static LogicalResult verifyModuleOp(ModuleOp op) {
@@ -95,12 +96,12 @@ static void printFuncOp(OpAsmPrinter &p, FuncOp &op) {
                             fnType.getResults());
 }
 
-void FuncOp::build(Builder *builder, OperationState &result, StringRef name,
+void FuncOp::build(OpBuilder &builder, OperationState &result, StringRef name,
                    FunctionType type, ArrayRef<NamedAttribute> attrs,
-                   ArrayRef<NamedAttributeList> argAttrs) {
+                   ArrayRef<MutableDictionaryAttr> argAttrs) {
   result.addRegion();
   result.addAttribute(SymbolTable::getSymbolAttrName(),
-                      builder->getStringAttr(name));
+                      builder.getStringAttr(name));
   result.addAttribute("type", TypeAttr::get(type));
   result.attributes.append(attrs.begin(), attrs.end());
   if (argAttrs.empty()) {
@@ -112,7 +113,7 @@ void FuncOp::build(Builder *builder, OperationState &result, StringRef name,
          "expected as many argument attribute lists as arguments");
   SmallString<8> argAttrName;
   for (unsigned i = 0; i < numInputs; ++i) {
-    if (auto argDict = argAttrs[i].getDictionary()) {
+    if (auto argDict = argAttrs[i].getDictionary(builder.getContext())) {
       result.addAttribute(getArgAttrName(i, argAttrName), argDict);
     }
   }
@@ -171,18 +172,18 @@ static void printExportOp(OpAsmPrinter &p, ExportOp op) {
       op.getAttrs(), /*elidedAttrs=*/{"function_ref", "export_name"});
 }
 
-void ExportOp::build(Builder *builder, OperationState &result,
+void ExportOp::build(OpBuilder &builder, OperationState &result,
                      FuncOp functionRef, StringRef exportName,
                      ArrayRef<NamedAttribute> attrs) {
-  build(builder, result, builder->getSymbolRefAttr(functionRef),
+  build(builder, result, builder.getSymbolRefAttr(functionRef),
         exportName.empty() ? functionRef.getName() : exportName, attrs);
 }
 
-void ExportOp::build(Builder *builder, OperationState &result,
+void ExportOp::build(OpBuilder &builder, OperationState &result,
                      FlatSymbolRefAttr functionRef, StringRef exportName,
                      ArrayRef<NamedAttribute> attrs) {
   result.addAttribute("function_ref", functionRef);
-  result.addAttribute("export_name", builder->getStringAttr(exportName));
+  result.addAttribute("export_name", builder.getStringAttr(exportName));
   result.attributes.append(attrs.begin(), attrs.end());
 }
 
@@ -195,7 +196,7 @@ static ParseResult parseImportOp(OpAsmParser &parser, OperationState *result) {
       failed(parser.parseLParen())) {
     return parser.emitError(parser.getNameLoc()) << "invalid import name";
   }
-  SmallVector<NamedAttributeList, 8> argAttrs;
+  SmallVector<MutableDictionaryAttr, 8> argAttrs;
   SmallVector<Type, 8> argTypes;
   while (failed(parser.parseOptionalRParen())) {
     OpAsmParser::OperandType operand;
@@ -206,7 +207,7 @@ static ParseResult parseImportOp(OpAsmParser &parser, OperationState *result) {
       return parser.emitError(operandLoc) << "invalid operand";
     }
     argTypes.push_back(operandType);
-    NamedAttributeList argAttrList;
+    MutableDictionaryAttr argAttrList;
     operand.name.consume_front("%");
     argAttrList.set(builder.getIdentifier("vm.name"),
                     builder.getStringAttr(operand.name));
@@ -231,7 +232,8 @@ static ParseResult parseImportOp(OpAsmParser &parser, OperationState *result) {
   for (int i = 0; i < argAttrs.size(); ++i) {
     SmallString<8> argName;
     mlir::impl::getArgAttrName(i, argName);
-    result->addAttribute(argName, argAttrs[i].getDictionary());
+    result->addAttribute(argName,
+                         argAttrs[i].getDictionary(builder.getContext()));
   }
   if (failed(parser.parseOptionalAttrDictWithKeyword(result->attributes))) {
     return failure();
@@ -279,11 +281,11 @@ static void printImportOp(OpAsmPrinter &p, ImportOp &op) {
                                       });
 }
 
-void ImportOp::build(Builder *builder, OperationState &result, StringRef name,
+void ImportOp::build(OpBuilder &builder, OperationState &result, StringRef name,
                      FunctionType type, ArrayRef<NamedAttribute> attrs,
-                     ArrayRef<NamedAttributeList> argAttrs) {
+                     ArrayRef<MutableDictionaryAttr> argAttrs) {
   result.addAttribute(SymbolTable::getSymbolAttrName(),
-                      builder->getStringAttr(name));
+                      builder.getStringAttr(name));
   result.addAttribute("type", TypeAttr::get(type));
   result.attributes.append(attrs.begin(), attrs.end());
   if (argAttrs.empty()) {
@@ -295,7 +297,7 @@ void ImportOp::build(Builder *builder, OperationState &result, StringRef name,
          "expected as many argument attribute lists as arguments");
   SmallString<8> argAttrName;
   for (unsigned i = 0; i < numInputs; ++i) {
-    if (auto argDict = argAttrs[i].getDictionary()) {
+    if (auto argDict = argAttrs[i].getDictionary(builder.getContext())) {
       result.addAttribute(getArgAttrName(i, argAttrName), argDict);
     }
   }
@@ -419,19 +421,19 @@ static LogicalResult verifyGlobalOp(Operation *op) {
   return success();
 }
 
-void GlobalI32Op::build(Builder *builder, OperationState &result,
+void GlobalI32Op::build(OpBuilder &builder, OperationState &result,
                         StringRef name, bool isMutable, Type type,
                         Optional<StringRef> initializer,
                         Optional<Attribute> initialValue,
                         ArrayRef<NamedAttribute> attrs) {
   result.addAttribute(SymbolTable::getSymbolAttrName(),
-                      builder->getStringAttr(name));
+                      builder.getStringAttr(name));
   if (isMutable) {
-    result.addAttribute("is_mutable", builder->getUnitAttr());
+    result.addAttribute("is_mutable", builder.getUnitAttr());
   }
   if (initializer.hasValue()) {
     result.addAttribute("initializer",
-                        builder->getSymbolRefAttr(initializer.getValue()));
+                        builder.getSymbolRefAttr(initializer.getValue()));
   } else if (initialValue.hasValue()) {
     result.addAttribute("initial_value", initialValue.getValue());
   }
@@ -439,7 +441,7 @@ void GlobalI32Op::build(Builder *builder, OperationState &result,
   result.attributes.append(attrs.begin(), attrs.end());
 }
 
-void GlobalI32Op::build(Builder *builder, OperationState &result,
+void GlobalI32Op::build(OpBuilder &builder, OperationState &result,
                         StringRef name, bool isMutable,
                         IREE::VM::FuncOp initializer,
                         ArrayRef<NamedAttribute> attrs) {
@@ -447,7 +449,7 @@ void GlobalI32Op::build(Builder *builder, OperationState &result,
         initializer.getName(), llvm::None, attrs);
 }
 
-void GlobalI32Op::build(Builder *builder, OperationState &result,
+void GlobalI32Op::build(OpBuilder &builder, OperationState &result,
                         StringRef name, bool isMutable, Type type,
                         Attribute initialValue,
                         ArrayRef<NamedAttribute> attrs) {
@@ -455,31 +457,31 @@ void GlobalI32Op::build(Builder *builder, OperationState &result,
         attrs);
 }
 
-void GlobalI32Op::build(Builder *builder, OperationState &result,
+void GlobalI32Op::build(OpBuilder &builder, OperationState &result,
                         StringRef name, bool isMutable, Type type,
                         ArrayRef<NamedAttribute> attrs) {
   build(builder, result, name, isMutable, type, llvm::None, llvm::None, attrs);
 }
 
-void GlobalRefOp::build(Builder *builder, OperationState &result,
+void GlobalRefOp::build(OpBuilder &builder, OperationState &result,
                         StringRef name, bool isMutable, Type type,
                         Optional<StringRef> initializer,
                         Optional<Attribute> initialValue,
                         ArrayRef<NamedAttribute> attrs) {
   result.addAttribute(SymbolTable::getSymbolAttrName(),
-                      builder->getStringAttr(name));
+                      builder.getStringAttr(name));
   if (isMutable) {
-    result.addAttribute("is_mutable", builder->getUnitAttr());
+    result.addAttribute("is_mutable", builder.getUnitAttr());
   }
   if (initializer.hasValue()) {
     result.addAttribute("initializer",
-                        builder->getSymbolRefAttr(initializer.getValue()));
+                        builder.getSymbolRefAttr(initializer.getValue()));
   }
   result.addAttribute("type", TypeAttr::get(type));
   result.attributes.append(attrs.begin(), attrs.end());
 }
 
-void GlobalRefOp::build(Builder *builder, OperationState &result,
+void GlobalRefOp::build(OpBuilder &builder, OperationState &result,
                         StringRef name, bool isMutable,
                         IREE::VM::FuncOp initializer,
                         ArrayRef<NamedAttribute> attrs) {
@@ -487,7 +489,7 @@ void GlobalRefOp::build(Builder *builder, OperationState &result,
         initializer.getName(), llvm::None, attrs);
 }
 
-void GlobalRefOp::build(Builder *builder, OperationState &result,
+void GlobalRefOp::build(OpBuilder &builder, OperationState &result,
                         StringRef name, bool isMutable, Type type,
                         Attribute initialValue,
                         ArrayRef<NamedAttribute> attrs) {
@@ -495,7 +497,7 @@ void GlobalRefOp::build(Builder *builder, OperationState &result,
         attrs);
 }
 
-void GlobalRefOp::build(Builder *builder, OperationState &result,
+void GlobalRefOp::build(OpBuilder &builder, OperationState &result,
                         StringRef name, bool isMutable, Type type,
                         ArrayRef<NamedAttribute> attrs) {
   build(builder, result, name, isMutable, type, llvm::None, llvm::None, attrs);
@@ -554,7 +556,7 @@ static LogicalResult verifyGlobalStoreOp(Operation *op) {
 static ParseResult parseConstI32Op(OpAsmParser &parser,
                                    OperationState *result) {
   Attribute valueAttr;
-  SmallVector<NamedAttribute, 1> dummyAttrs;
+  NamedAttrList dummyAttrs;
   if (failed(parser.parseAttribute(valueAttr, "value", dummyAttrs))) {
     return parser.emitError(parser.getCurrentLocation())
            << "Invalid attribute encoding";
@@ -624,23 +626,23 @@ Attribute ConstI32Op::convertConstValue(Attribute value) {
   return Attribute();
 }
 
-void ConstI32Op::build(Builder *builder, OperationState &result,
+void ConstI32Op::build(OpBuilder &builder, OperationState &result,
                        Attribute value) {
   Attribute newValue = convertConstValue(value);
   result.addAttribute("value", newValue);
   result.addTypes(newValue.getType());
 }
 
-void ConstI32Op::build(Builder *builder, OperationState &result,
+void ConstI32Op::build(OpBuilder &builder, OperationState &result,
                        int32_t value) {
-  return build(builder, result, builder->getI32IntegerAttr(value));
+  return build(builder, result, builder.getI32IntegerAttr(value));
 }
 
-void ConstI32ZeroOp::build(Builder *builder, OperationState &result) {
-  result.addTypes(builder->getIntegerType(32));
+void ConstI32ZeroOp::build(OpBuilder &builder, OperationState &result) {
+  result.addTypes(builder.getIntegerType(32));
 }
 
-void ConstRefZeroOp::build(Builder *builder, OperationState &result,
+void ConstRefZeroOp::build(OpBuilder &builder, OperationState &result,
                            Type objectType) {
   result.addTypes(objectType);
 }
@@ -664,9 +666,9 @@ static void printRodataOp(OpAsmPrinter &p, RodataOp &op) {
   p.printAttribute(op.value());
 }
 
-void RodataOp::build(Builder *builder, OperationState &result, StringRef name,
+void RodataOp::build(OpBuilder &builder, OperationState &result, StringRef name,
                      ElementsAttr value, ArrayRef<NamedAttribute> attrs) {
-  result.addAttribute("sym_name", builder->getStringAttr(name));
+  result.addAttribute("sym_name", builder.getStringAttr(name));
   result.addAttribute("value", value);
   result.addAttributes(attrs);
 }
@@ -679,17 +681,16 @@ static LogicalResult verifyConstRefRodataOp(ConstRefRodataOp &op) {
   return success();
 }
 
-void ConstRefRodataOp::build(Builder *builder, OperationState &result,
+void ConstRefRodataOp::build(OpBuilder &builder, OperationState &result,
                              StringRef rodataName,
                              ArrayRef<NamedAttribute> attrs) {
-  result.addAttribute("rodata", builder->getSymbolRefAttr(rodataName));
-  auto type =
-      IREE::VM::RefType::get(ByteBufferType::get(builder->getContext()));
+  result.addAttribute("rodata", builder.getSymbolRefAttr(rodataName));
+  auto type = IREE::VM::RefType::get(ByteBufferType::get(builder.getContext()));
   result.addTypes({type});
   result.addAttributes(attrs);
 }
 
-void ConstRefRodataOp::build(Builder *builder, OperationState &result,
+void ConstRefRodataOp::build(OpBuilder &builder, OperationState &result,
                              RodataOp rodataOp,
                              ArrayRef<NamedAttribute> attrs) {
   build(builder, result, rodataOp.getName(), attrs);
@@ -758,12 +759,11 @@ void BranchOp::eraseOperand(unsigned index) {
   getOperation()->eraseOperand(index);
 }
 
-Optional<OperandRange> BranchOp::getSuccessorOperands(unsigned index) {
+Optional<MutableOperandRange> BranchOp::getMutableSuccessorOperands(
+    unsigned index) {
   assert(index == 0 && "invalid successor index");
-  return getOperands();
+  return destOperandsMutable();
 }
-
-bool BranchOp::canEraseSuccessorOperand() { return true; }
 
 static ParseResult parseCallVariadicOp(OpAsmParser &parser,
                                        OperationState *result) {
@@ -774,19 +774,44 @@ static ParseResult parseCallVariadicOp(OpAsmParser &parser,
     return parser.emitError(calleeLoc) << "invalid callee symbol";
   }
 
+  // Parsing here is a bit tricky as we want to be able to support things like
+  // variadic lists of tuples while we don't know that the types are tuples yet.
+  // We'll instead parse each segment as a flat list so `[(%a, %b), (%c, %d)]`
+  // parses as `[%a, %b, %c, %d]` and then do the accounting below when parsing
+  // types.
   SmallVector<OpAsmParser::OperandType, 4> flatOperands;
-  SmallVector<int16_t, 4> segmentSizes;
+  SmallVector<int16_t, 4> flatSegmentSizes;
   while (failed(parser.parseOptionalRParen())) {
     if (succeeded(parser.parseOptionalLSquare())) {
       // Variadic list.
-      SmallVector<OpAsmParser::OperandType, 4> segmentOperands;
+      SmallVector<OpAsmParser::OperandType, 4> flatSegmentOperands;
       while (failed(parser.parseOptionalRSquare())) {
-        OpAsmParser::OperandType segmentOperand;
-        if (failed(parser.parseOperand(segmentOperand))) {
-          return parser.emitError(parser.getCurrentLocation())
-                 << "invalid operand";
+        if (succeeded(parser.parseOptionalLParen())) {
+          // List contains tuples, so track the () and parse inside of it.
+          while (failed(parser.parseOptionalRParen())) {
+            OpAsmParser::OperandType segmentOperand;
+            if (failed(parser.parseOperand(segmentOperand))) {
+              return parser.emitError(parser.getCurrentLocation())
+                     << "invalid operand";
+            }
+            flatSegmentOperands.push_back(segmentOperand);
+            if (failed(parser.parseOptionalComma())) {
+              if (failed(parser.parseRParen())) {
+                return parser.emitError(parser.getCurrentLocation())
+                       << "malformed nested variadic tuple operand list";
+              }
+              break;
+            }
+          }
+        } else {
+          // Flat list of operands.
+          OpAsmParser::OperandType segmentOperand;
+          if (failed(parser.parseOperand(segmentOperand))) {
+            return parser.emitError(parser.getCurrentLocation())
+                   << "invalid operand";
+          }
+          flatSegmentOperands.push_back(segmentOperand);
         }
-        segmentOperands.push_back(segmentOperand);
         if (failed(parser.parseOptionalComma())) {
           if (failed(parser.parseRSquare())) {
             return parser.emitError(parser.getCurrentLocation())
@@ -795,8 +820,9 @@ static ParseResult parseCallVariadicOp(OpAsmParser &parser,
           break;
         }
       }
-      segmentSizes.push_back(segmentOperands.size());
-      flatOperands.append(segmentOperands.begin(), segmentOperands.end());
+      flatSegmentSizes.push_back(flatSegmentOperands.size());
+      flatOperands.append(flatSegmentOperands.begin(),
+                          flatSegmentOperands.end());
     } else {
       // Normal single operand.
       OpAsmParser::OperandType operand;
@@ -804,7 +830,7 @@ static ParseResult parseCallVariadicOp(OpAsmParser &parser,
         return parser.emitError(parser.getCurrentLocation())
                << "malformed non-variadic operand";
       }
-      segmentSizes.push_back(-1);
+      flatSegmentSizes.push_back(-1);
       flatOperands.push_back(operand);
     }
     if (failed(parser.parseOptionalComma())) {
@@ -832,8 +858,17 @@ static ParseResult parseCallVariadicOp(OpAsmParser &parser,
     }
     bool isVariadic = succeeded(parser.parseOptionalEllipsis());
     if (isVariadic) {
-      for (int i = 0; i < segmentSizes[segmentIndex]; ++i) {
-        flatOperandTypes.push_back(operandType);
+      if (auto tupleType = operandType.dyn_cast<TupleType>()) {
+        for (int i = 0; i < flatSegmentSizes[segmentIndex] / tupleType.size();
+             ++i) {
+          for (auto type : tupleType) {
+            flatOperandTypes.push_back(type);
+          }
+        }
+      } else {
+        for (int i = 0; i < flatSegmentSizes[segmentIndex]; ++i) {
+          flatOperandTypes.push_back(operandType);
+        }
       }
     } else {
       flatOperandTypes.push_back(operandType);
@@ -857,9 +892,9 @@ static ParseResult parseCallVariadicOp(OpAsmParser &parser,
   result->addAttribute(
       "segment_sizes",
       DenseIntElementsAttr::get(
-          VectorType::get({static_cast<int64_t>(segmentSizes.size())},
+          VectorType::get({static_cast<int64_t>(flatSegmentSizes.size())},
                           parser.getBuilder().getIntegerType(16)),
-          segmentSizes));
+          flatSegmentSizes));
   result->addAttribute("segment_types",
                        parser.getBuilder().getArrayAttr(llvm::to_vector<4>(
                            llvm::map_range(segmentTypes, [&](Type type) {
@@ -877,18 +912,38 @@ static ParseResult parseCallVariadicOp(OpAsmParser &parser,
 static void printCallVariadicOp(OpAsmPrinter &p, CallVariadicOp &op) {
   p << op.getOperationName() << ' ' << op.getAttr("callee") << '(';
   int operand = 0;
-  llvm::interleaveComma(op.segment_sizes(), p, [&](APInt segmentSize) {
-    if (segmentSize.getSExtValue() == -1) {
-      p.printOperand(op.getOperand(operand++));
-    } else {
-      p << '[';
-      SmallVector<Value, 4> segmentOperands;
-      for (int i = 0; i < segmentSize.getZExtValue(); ++i) {
-        segmentOperands.push_back(op.getOperand(operand++));
-      }
-      p << segmentOperands << ']';
-    }
-  });
+  llvm::interleaveComma(
+      llvm::zip(op.segment_sizes(), op.segment_types()), p,
+      [&](std::tuple<APInt, Attribute> segmentSizeType) {
+        int segmentSize = std::get<0>(segmentSizeType).getSExtValue();
+        Type segmentType =
+            std::get<1>(segmentSizeType).cast<TypeAttr>().getValue();
+        if (segmentSize == -1) {
+          p.printOperand(op.getOperand(operand++));
+        } else {
+          p << '[';
+          if (auto tupleType = segmentType.dyn_cast<TupleType>()) {
+            int tupleCount = segmentSize / tupleType.size();
+            for (int i = 0; i < tupleCount; ++i) {
+              p << '(';
+              SmallVector<Value, 4> tupleOperands;
+              for (int i = 0; i < tupleType.size(); ++i) {
+                tupleOperands.push_back(op.getOperand(operand++));
+              }
+              p << tupleOperands;
+              p << ')';
+              if (i < tupleCount - 1) p << ", ";
+            }
+          } else {
+            SmallVector<Value, 4> segmentOperands;
+            for (int i = 0; i < segmentSize; ++i) {
+              segmentOperands.push_back(op.getOperand(operand++));
+            }
+            p << segmentOperands;
+          }
+          p << ']';
+        }
+      });
   p << ')';
   p.printOptionalAttrDict(op.getAttrs(), /*elidedAttrs=*/{
                               "callee",
@@ -917,12 +972,26 @@ static void printCallVariadicOp(OpAsmPrinter &p, CallVariadicOp &op) {
   }
 }
 
-Optional<OperandRange> CondBranchOp::getSuccessorOperands(unsigned index) {
+Optional<MutableOperandRange> CondBranchOp::getMutableSuccessorOperands(
+    unsigned index) {
   assert(index < getNumSuccessors() && "invalid successor index");
-  return index == trueIndex ? getTrueOperands() : getFalseOperands();
+  return index == trueIndex ? trueDestOperandsMutable()
+                            : falseDestOperandsMutable();
 }
 
-bool CondBranchOp::canEraseSuccessorOperand() { return true; }
+static LogicalResult verifyFailOp(FailOp op) {
+  APInt status;
+  if (matchPattern(op.status(), m_ConstantInt(&status))) {
+    if (status == 0) {
+      return op.emitOpError() << "status is 0; expected to not be OK";
+    }
+  }
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// Async/fiber ops
+//===----------------------------------------------------------------------===//
 
 //===----------------------------------------------------------------------===//
 // Debugging
@@ -938,12 +1007,11 @@ void BreakOp::eraseOperand(unsigned index) {
   getOperation()->eraseOperand(index);
 }
 
-Optional<OperandRange> BreakOp::getSuccessorOperands(unsigned index) {
+Optional<MutableOperandRange> BreakOp::getMutableSuccessorOperands(
+    unsigned index) {
   assert(index == 0 && "invalid successor index");
-  return getOperands();
+  return destOperandsMutable();
 }
-
-bool BreakOp::canEraseSuccessorOperand() { return true; }
 
 Block *CondBreakOp::getDest() { return getOperation()->getSuccessor(0); }
 
@@ -955,12 +1023,11 @@ void CondBreakOp::eraseOperand(unsigned index) {
   getOperation()->eraseOperand(index);
 }
 
-Optional<OperandRange> CondBreakOp::getSuccessorOperands(unsigned index) {
+Optional<MutableOperandRange> CondBreakOp::getMutableSuccessorOperands(
+    unsigned index) {
   assert(index == 0 && "invalid successor index");
-  return destOperands();
+  return destOperandsMutable();
 }
-
-bool CondBreakOp::canEraseSuccessorOperand() { return true; }
 
 //===----------------------------------------------------------------------===//
 // TableGen definitions (intentionally last)

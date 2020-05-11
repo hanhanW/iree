@@ -20,7 +20,8 @@
 //===----------------------------------------------------------------------===//
 #include "iree/compiler/Translation/CodegenPasses/Passes.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
-#include "mlir/Dialect/Linalg/Utils/Utils.h"
+#include "mlir/Dialect/Linalg/Passes.h"
+#include "mlir/Dialect/Linalg/Transforms/Transforms.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Function.h"
 #include "mlir/IR/Operation.h"
@@ -65,7 +66,7 @@ static bool isConstantFusibleWithLinalgOp(ConstantOp producer,
   auto consumerOp = dyn_cast<linalg::GenericOp>(consumer.getOperation());
   if (!consumerOp || producer.getResult() != consumerOp.getOperand(consumerIdx))
     return false;
-  return !consumerOp.fun();
+  return true;
 }
 
 /// Fuses scalar constant op with linalg::generic op when the former is a
@@ -96,7 +97,6 @@ static Optional<linalg::LinalgOp> fuseGenericOpWithConstantScalar(
       b.getI64IntegerAttr(consumer.getNumOutputs()),
       b.getArrayAttr(fusedIndexingMapAttrs), consumer.iterator_types(),
       /*doc=*/nullptr,
-      /*fun=*/nullptr,
       /*library_call=*/nullptr);
 
   // Build the body of the fused operation. All arguments are the same, except
@@ -130,11 +130,7 @@ LogicalResult IREEFuseGenericTensorOps::matchAndRewrite(
     if (!producer || producer->getNumResults() != 1) continue;
     bool hasSingleUse = producer->getResult(0).hasOneUse();
     Optional<linalg::LinalgOp> fusedOp;
-    if (auto producerOp = dyn_cast<linalg::LinalgOp>(producer)) {
-      fusedOp = linalg::fuseTensorOps(rewriter, producerOp,
-                                      cast<linalg::LinalgOp>(op.getOperation()),
-                                      operand.index());
-    } else if (auto producerOp = dyn_cast<ConstantOp>(producer)) {
+    if (auto producerOp = dyn_cast<ConstantOp>(producer)) {
       fusedOp = fuseGenericOpWithConstantScalar(rewriter, producerOp, op,
                                                 operand.index());
     }
@@ -163,10 +159,10 @@ class HLOConstantConverter : public OpRewritePattern<xla_hlo::ConstOp> {
 
 void IREELinalgFusionPass::runOnFunction() {
   OwningRewritePatternList patterns;
-  Operation *op = getOperation();
+  populateLinalgTensorOpsFusionPatterns(&getContext(), patterns);
   patterns.insert<IREEFuseGenericTensorOps, HLOConstantConverter>(
-      op->getContext());
-  applyPatternsAndFoldGreedily(op->getRegions(), patterns);
+      &getContext());
+  applyPatternsAndFoldGreedily(getOperation(), patterns);
 }
 
 std::unique_ptr<OperationPass<FuncOp>> createLinalgOnTensorsFusionPass() {
@@ -174,6 +170,7 @@ std::unique_ptr<OperationPass<FuncOp>> createLinalgOnTensorsFusionPass() {
 }
 
 static PassRegistration<IREELinalgFusionPass> pass(
-    "iree-linalg-fusion", "Fuse Linalg operations within a dispatch region");
+    "iree-codegen-linalg-fusion",
+    "Fuse Linalg operations within a dispatch region");
 }  // namespace iree_compiler
 }  // namespace mlir

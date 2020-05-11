@@ -22,8 +22,11 @@ iree_cc_library(
   SRCS
     "LLVMTarget.cpp"
   DEPS
+    ::LLVMIRPasses
+    ::LLVMTargetOptions
     LLVMCore
     LLVMSupport
+    LLVMX86CodeGen
     MLIRIR
     MLIRLinalgOps
     MLIRLinalgToLLVM
@@ -36,11 +39,41 @@ iree_cc_library(
     MLIRTargetLLVMIR
     MLIRTransforms
     iree::compiler::Dialect::Flow::IR
+    iree::compiler::Dialect::HAL::IR
+    iree::compiler::Dialect::HAL::IR::HALDialect
     iree::compiler::Dialect::HAL::Target
-    iree::compiler::Dialect::HAL::Target::LegacyUtil
+    iree::compiler::Dialect::IREE::IR
     iree::compiler::Translation::CodegenPasses
-    iree::compiler::Translation::CodegenUtils
     iree::schemas::llvmir_executable_def_cc_fbs
-  ALWAYSLINK
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    LLVMIRPasses
+  HDRS
+    "LLVMIRPasses.h"
+  SRCS
+    "LLVMIRPasses.cpp"
+  DEPS
+    ::LLVMTargetOptions
+    LLVMCore
+    LLVMPasses
+    LLVMSupport
+    LLVMTarget
+    MLIRSupport
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    LLVMTargetOptions
+  HDRS
+    "LLVMTargetOptions.h"
+  SRCS
+    "LLVMTargetOptions.cpp"
+  DEPS
+    LLVMPasses
+    LLVMSupport
   PUBLIC
 )

@@ -16,3 +16,14 @@ package(
     default_visibility = ["//visibility:public"],
     licenses = ["notice"],  # Apache 2.0
 )
+
+cc_library(
+    name = "init_translations",
+    hdrs = [
+        "init_translations.h",
+    ],
+    deps = [
+        "//iree/compiler/Translation/SPIRV/LinalgToSPIRV",
+        "@llvm-project//mlir:Pass",
+    ],
+)

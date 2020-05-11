@@ -28,14 +28,11 @@ cc_library(
     deps = [
         "//iree/compiler/Dialect/Flow/IR",
         "//iree/compiler/Dialect/HAL/Target",
-        "//iree/compiler/Dialect/HAL/Target:LegacyUtil",
         "//iree/compiler/Dialect/IREE/IR",
         "//iree/compiler/Dialect/Vulkan/IR",
         "//iree/compiler/Dialect/Vulkan/Utils",
         "//iree/compiler/Translation/CodegenPasses",
-        "//iree/compiler/Translation/CodegenUtils",
         "//iree/compiler/Translation/SPIRV/LinalgToSPIRV",
-        "//iree/compiler/Translation/SPIRV/XLAToSPIRV",
         "//iree/schemas:spirv_executable_def_cc_fbs",
         "@com_github_google_flatbuffers//:flatbuffers",
         "@llvm-project//llvm:support",
@@ -49,5 +46,4 @@ cc_library(
         "@llvm-project//mlir:Transforms",
         "@org_tensorflow//tensorflow/compiler/mlir/xla:hlo",
     ],
-    alwayslink = 1,
 )

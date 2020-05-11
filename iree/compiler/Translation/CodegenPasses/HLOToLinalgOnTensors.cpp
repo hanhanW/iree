@@ -22,7 +22,6 @@
 #include <memory>
 
 #include "iree/compiler/Translation/CodegenPasses/Passes.h"
-#include "iree/compiler/Translation/CodegenUtils/CodegenUtils.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/IR/Attributes.h"
@@ -89,7 +88,7 @@ class SplatConstConverter : public OpConversionPattern<ConstantOp> {
         rewriter.getI64IntegerAttr(1),
         rewriter.getAffineMapArrayAttr(rewriter.getMultiDimIdentityMap(nloops)),
         getNParallelLoopsAttrs(nloops, rewriter),
-        /*doc=*/nullptr, /*fun=*/nullptr,
+        /*doc=*/nullptr,
         /*library_call=*/nullptr);
     auto* region = &linalgOp.region();
     auto* block = rewriter.createBlock(region, region->end());
@@ -102,19 +101,17 @@ class SplatConstConverter : public OpConversionPattern<ConstantOp> {
   }
 };
 
-struct XlaLegalizeToLinalg
-    : public PassWrapper<XlaLegalizeToLinalg, FunctionPass> {
+struct ConvertHLOToLinalgOnTensorsPass
+    : public PassWrapper<ConvertHLOToLinalgOnTensorsPass, FunctionPass> {
   void runOnFunction() override {
-    auto func = getFunction();
-    if (!isDispatchFuncImpl(func)) return;
-
     OwningRewritePatternList patterns;
+    populateHLOToLinalgOnTensorsConversionPatterns(&getContext(), patterns);
+
     ConversionTarget target(getContext());
-    target.addLegalDialect<linalg::LinalgDialect, StandardOpsDialect>();
+    // Allow constant to appear in Linalg op regions.
     target.addDynamicallyLegalOp<ConstantOp>([](ConstantOp op) -> bool {
       return isa<linalg::LinalgOp>(op.getOperation()->getParentOp());
     });
-
     // Don't convert the body of reduction ops.
     target.addDynamicallyLegalDialect<xla_hlo::XlaHloDialect>(
         Optional<ConversionTarget::DynamicLegalityCallbackFn>(
@@ -123,9 +120,10 @@ struct XlaLegalizeToLinalg
               return isa<xla_hlo::ReduceOp>(parentOp) ||
                      isa<xla_hlo::ReduceWindowOp>(parentOp);
             }));
+    // Let the rest fall through.
+    target.markUnknownOpDynamicallyLegal([](Operation*) { return true; });
 
-    populateHLOToLinalgOnTensorsConversionPatterns(func.getContext(), patterns);
-    if (failed(applyPartialConversion(func, target, patterns, nullptr))) {
+    if (failed(applyPartialConversion(getFunction(), target, patterns))) {
       signalPassFailure();
     }
   }
@@ -140,11 +138,11 @@ void populateHLOToLinalgOnTensorsConversionPatterns(
 }
 
 std::unique_ptr<OperationPass<FuncOp>> createHLOToLinalgOnTensorsPass() {
-  return std::make_unique<XlaLegalizeToLinalg>();
+  return std::make_unique<ConvertHLOToLinalgOnTensorsPass>();
 }
 
-static PassRegistration<XlaLegalizeToLinalg> legalize_pass(
-    "iree-hlo-to-linalg-on-tensors",
+static PassRegistration<ConvertHLOToLinalgOnTensorsPass> legalize_pass(
+    "iree-codegen-hlo-to-linalg-on-tensors",
     "Convert from XLA-HLO ops to Linalg ops on tensors");
 
 }  // namespace iree_compiler

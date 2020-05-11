@@ -13,6 +13,8 @@
 // limitations under the License.
 
 #include "iree/compiler/Dialect/HAL/IR/HALOps.h"
+#include "iree/compiler/Dialect/HAL/IR/HALTypes.h"
+#include "iree/compiler/Dialect/HAL/Utils/TypeUtils.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/IR/MLIRContext.h"
@@ -23,12 +25,8 @@ namespace mlir {
 namespace iree_compiler {
 namespace {
 
-// Matches:
-//   %0 = ... buffer_view ...
-//   %1 = hal.buffer_view_buffer %0
-//   %2 = dim %1, ...
-// Note that such a pattern is not legal but is created in various custom op
-// conversions.
+// Lowers dim operations against values that were originally tensors but have
+// been converted to HAL buffer types.
 class BackingBufferBufferViewDimPattern : public OpConversionPattern<DimOp> {
  public:
   using OpConversionPattern::OpConversionPattern;
@@ -37,25 +35,24 @@ class BackingBufferBufferViewDimPattern : public OpConversionPattern<DimOp> {
       DimOp dimOp, llvm::ArrayRef<Value> rawOperands,
       ConversionPatternRewriter &rewriter) const override {
     DimOpOperandAdaptor operands(rawOperands);
-    auto backingBufferOp =
-        llvm::dyn_cast_or_null<IREE::HAL::BufferViewBufferOp>(
-            operands.memrefOrTensor().getDefiningOp());
-    if (!backingBufferOp) return failure();
+    if (!dimOp.memrefOrTensor().getType().isa<TensorType>() ||
+        !IREE::HAL::TensorRewriteAdaptor::isValidNewType(
+            operands.memrefOrTensor().getType())) {
+      return failure();
+    }
+    auto adaptor = IREE::HAL::TensorRewriteAdaptor::get(
+        dimOp.getLoc(), dimOp.memrefOrTensor(), operands.memrefOrTensor(),
+        rewriter);
 
     auto dimIndex = rewriter.getI32IntegerAttr(dimOp.getIndex());
     rewriter.replaceOpWithNewOp<IREE::HAL::BufferViewDimOp>(
-        dimOp, dimOp.getResult().getType(), backingBufferOp.buffer_view(),
-        dimIndex);
+        dimOp, dimOp.getResult().getType(), adaptor.getBufferView(), dimIndex);
     return success();
   }
 };
 
-// Matches:
-//   %0 = ... buffer_view ...
-//   %1 = hal.buffer_view_buffer %0
-//   %2 = rank %1
-// Note that such a pattern is not legal but is created in various custom op
-// conversions.
+// Lowers rank operations against values that were originally tensors but have
+// been converted to HAL buffer types.
 class BackingBufferBufferViewRankPattern : public OpConversionPattern<RankOp> {
  public:
   using OpConversionPattern::OpConversionPattern;
@@ -63,13 +60,15 @@ class BackingBufferBufferViewRankPattern : public OpConversionPattern<RankOp> {
   LogicalResult matchAndRewrite(
       RankOp rankOp, llvm::ArrayRef<Value> rawOperands,
       ConversionPatternRewriter &rewriter) const override {
-    auto backingBufferOp =
-        llvm::dyn_cast_or_null<IREE::HAL::BufferViewBufferOp>(
-            rawOperands[0].getDefiningOp());
-    if (!backingBufferOp) return failure();
+    if (!IREE::HAL::TensorRewriteAdaptor::isValidNewType(
+            rawOperands[0].getType())) {
+      return failure();
+    }
+    auto adaptor = IREE::HAL::TensorRewriteAdaptor::get(
+        rankOp.getLoc(), rankOp.getOperand(), rawOperands[0], rewriter);
 
     rewriter.replaceOpWithNewOp<IREE::HAL::BufferViewRankOp>(
-        rankOp, rankOp.getResult().getType(), backingBufferOp.buffer_view());
+        rankOp, rankOp.getResult().getType(), adaptor.getBufferView());
     return success();
   }
 };

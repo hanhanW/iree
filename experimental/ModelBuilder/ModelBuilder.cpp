@@ -15,6 +15,10 @@
 #include "experimental/ModelBuilder/ModelBuilder.h"
 
 #include "mlir/Dialect/Affine/EDSC/Builders.h"
+#include "mlir/Dialect/GPU/GPUDialect.h"
+#include "mlir/Dialect/SPIRV/TargetAndABI.h"
+#include "mlir/Dialect/StandardOps/IR/Ops.h"
+#include "mlir/IR/AffineExpr.h"
 #include "mlir/IR/StandardTypes.h"
 #include "mlir/IR/TypeUtilities.h"
 
@@ -44,17 +48,57 @@ Value mlir::ModelBuilder::constant_f64(double v) {
                             FloatType::getF64(ScopedContext::getContext()));
 }
 
+Value mlir::ModelBuilder::constant_index(int64_t v) {
+  return std_constant_index(v);
+}
+
 FuncOp mlir::ModelBuilder::makeFunction(StringRef name, ArrayRef<Type> results,
                                         ArrayRef<Type> args,
-                                        bool emitCInterface, bool declOnly) {
-  auto function =
-      FuncOp::create(loc, name, FunctionType::get(args, results, &ctx));
-  if (!declOnly) function.addEntryBlock();
-  if (emitCInterface)
-    function.setAttr("llvm.emit_c_interface",
-                     mlir::UnitAttr::get(getContext()));
+                                        MLIRFuncOpConfig config) {
+  FunctionType ft = FunctionType::get(args, results, &ctx);
+  auto function = FuncOp::create(loc, name, ft);
+  config.apply(function);
   module->push_back(function);
   return function;
+}
+FuncOp mlir::ModelBuilder::makeFunction(
+    std::function<std::string(FunctionType)> nameBuilder,
+    ArrayRef<Type> results, ArrayRef<Type> args, MLIRFuncOpConfig config) {
+  FunctionType ft = FunctionType::get(args, results, &ctx);
+  return makeFunction(nameBuilder(ft), results, args, config);
+}
+
+static spirv::TargetEnvAttr getTargetEnv(MLIRContext *context) {
+  auto triple = spirv::VerCapExtAttr::get(
+      spirv::Version::V_1_0, {spirv::Capability::Shader},
+      {spirv::Extension::SPV_KHR_storage_buffer_storage_class}, context);
+  return spirv::TargetEnvAttr::get(triple,
+                                   spirv::getDefaultResourceLimits(context));
+}
+
+gpu::GPUModuleOp mlir::ModelBuilder::makeGPUModule(StringRef name) {
+  // Add module attributes required first.
+  module->setAttr(gpu::GPUDialect::getContainerModuleAttrName(),
+                  UnitAttr::get(module->getContext()));
+  spirv::TargetEnvAttr targetEnv = getTargetEnv(module->getContext());
+  module->setAttr(spirv::getTargetEnvAttrName(), targetEnv);
+  OpBuilder b(&module->getBodyRegion());
+  auto kernelModule = b.create<gpu::GPUModuleOp>(loc, name);
+  return kernelModule;
+}
+
+gpu::GPUFuncOp mlir::ModelBuilder::makeGPUKernel(StringRef name,
+                                                 gpu::GPUModuleOp GPUModule,
+                                                 ArrayRef<Type> args,
+                                                 ArrayRef<Type> results) {
+  auto fnType = FunctionType::get(args, results, module->getContext());
+  OpBuilder b(&GPUModule.body());
+  auto kernelFunc = b.create<gpu::GPUFuncOp>(loc, name, fnType);
+  kernelFunc.setAttr(gpu::GPUDialect::getKernelFuncAttrName(), b.getUnitAttr());
+  kernelFunc.setAttr(
+      spirv::getEntryPointABIAttrName(),
+      spirv::getEntryPointABIAttr({1, 1, 1}, module->getContext()));
+  return kernelFunc;
 }
 
 VectorType mlir::ModelBuilder::getVectorType(ArrayRef<int64_t> shape,
@@ -73,21 +117,21 @@ RankedTensorType mlir::ModelBuilder::getRankedTensorType(
   return RankedTensorType::get(shape, elementType);
 }
 
-Value mlir::ModelBuilder::fusedBiasTanh(ValueHandle x, ValueHandle bias) {
+Value mlir::ModelBuilder::fusedBiasTanh(Value x, Value bias) {
   using edsc::op::operator+;
   using edsc::op::operator*;
   using edsc::intrinsics::std_call;
   assert(x.getType().isF32() && bias.getType().isF32() && "f32 expected");
-  ValueHandle half(constant_f32(0.5f));
+  Value half = constant_f32(0.5f);
   return x + half * call_tanhf((x + bias) * half) + half;
 }
 
-ValueHandle mlir::ModelBuilder::FCBiasTanh(std::array<Value, 3> fcArgs,
-                                           Value biasValueArg) {
+Value mlir::ModelBuilder::FCBiasTanh(std::array<Value, 3> fcArgs,
+                                     Value biasValueArg) {
   //==========================================================================//
   // Layer 1: FC
   //==========================================================================//
-  ValueHandle I(fcArgs[0]), W(fcArgs[1]), O(fcArgs[2]);
+  Value I = fcArgs[0], W = fcArgs[1], O = fcArgs[2];
   // Emit a linalg.generic op that implements matmul:
   linalg_generic_matmul(I, W, O);
 
@@ -117,32 +161,45 @@ Value ModelBuilder::FCBiasTanhTensors(RankedTensorType outputTensorType,
   //==========================================================================//
   // Layer 1: FC
   //==========================================================================//
-  ValueHandle I(fcArgs[0]), W(fcArgs[1]);
+  Value I = fcArgs[0], W = fcArgs[1];
   Value O2 = linalg_generic_matmul(I, W, outputTensorType)->getResult(0);
 
   //==========================================================================//
   // Layer 2: BiasAddTanh Block
   //==========================================================================//
-  ValueHandle Bias(biasValueArg);
   AffineExpr i, j;
   bindDims(&ctx, i, j);
   // in-place with explicit bias broacast
-  StructuredIndexed o2(O2), bias(Bias), o3Type(outputTensorType);
+  StructuredIndexed o2(O2), bias(biasValueArg), o3Type(outputTensorType);
   return linalg_generic_pointwise(fusedBiasTanh, o2({i, j}), bias({j}),
                                   o3Type({i, j}))
       ->getResult(0);
 }
 
-ValueHandle ModelBuilder::call_tanhf(Value v) {
+Value ModelBuilder::call_tanhf(Value v) {
   assert(v.getType().isF32() && "f32 expected");
-  return ValueHandle(
-      emitCallToRegisteredSymbol("tanhf", v.getType(), v)->getResult(0));
+  return emitCallToRegisteredSymbol("tanhf", v.getType(), v)->getResult(0);
+}
+
+void ModelBuilder::call_print_memref_f32(Value v) {
+  auto &builder = ScopedContext::getBuilderRef();
+  auto loc = builder.getInsertionBlock()
+                 ->getParent()
+                 ->getParentOfType<FuncOp>()
+                 .getLoc();
+  auto elementType = v.getType().cast<MemRefType>().getElementType();
+  auto unrankedType = UnrankedMemRefType::get(elementType, 0);
+  auto castMemRef = builder.create<MemRefCastOp>(loc, v, unrankedType);
+  if (elementType.isF32())
+    emitCallToRegisteredSymbol("print_memref_f32", {}, {castMemRef});
+  else
+    llvm_unreachable("Incorrect argument type for print_memref_f32");
 }
 
 Operation *ModelBuilder::emitCallToRegisteredSymbol(StringRef functionName,
                                                     ArrayRef<Type> returnTypes,
                                                     ValueRange values) {
-  auto &builder = ScopedContext::getBuilder();
+  auto &builder = ScopedContext::getBuilderRef();
   auto funcOp =
       builder.getInsertionBlock()->getParent()->getParentOfType<FuncOp>();
   Operation *func = SymbolTable::lookupNearestSymbolFrom(funcOp, functionName);
@@ -156,6 +213,101 @@ Operation *ModelBuilder::emitCallToRegisteredSymbol(StringRef functionName,
                           builder.getContext()),
         ArrayRef<NamedAttribute>{});
   }
-  return std_call(builder.getSymbolRefAttr(func), returnTypes, values)
-      .getOperation();
+  return std_call(builder.getSymbolRefAttr(func), returnTypes, values);
+}
+
+MLIRFuncOpConfig &MLIRFuncOpConfig::setNoInline(bool v) {
+  noInline = v;
+  return *this;
+}
+MLIRFuncOpConfig &MLIRFuncOpConfig::setPreferAvx512(bool v) {
+  preferAvx512 = v;
+  return *this;
+}
+MLIRFuncOpConfig &MLIRFuncOpConfig::setTargetCpu(StringRef s) {
+  targetCpu = s;
+  return *this;
+}
+MLIRFuncOpConfig &MLIRFuncOpConfig::setDeclOnly(bool v) {
+  declOnly = v;
+  return *this;
+}
+MLIRFuncOpConfig &MLIRFuncOpConfig::setEmitCInterface(bool v) {
+  emitCInterface = v;
+  return *this;
+}
+
+void MLIRFuncOpConfig::apply(FuncOp &f) {
+  MLIRContext *ctx = f.getContext();
+  SmallVector<Attribute, 8> attrs;
+  if (noInline) attrs.push_back(StringAttr::get("noinline", ctx));
+  if (preferAvx512)
+    attrs.push_back(ArrayAttr::get({StringAttr::get("prefer-vector-width", ctx),
+                                    StringAttr::get("512", ctx)},
+                                   ctx));
+  if (!targetCpu.empty())
+    attrs.push_back(ArrayAttr::get(
+        {StringAttr::get("target-cpu", ctx), StringAttr::get(targetCpu, ctx)},
+        ctx));
+  if (!attrs.empty()) f.setAttr("passthrough", ArrayAttr::get(attrs, ctx));
+
+  if (emitCInterface)
+    f.setAttr("llvm.emit_c_interface", mlir::UnitAttr::get(ctx));
+
+  if (!declOnly) f.addEntryBlock();
+}
+
+// -----------------------------------------------------------------------------
+// EDSC extensions.
+// -----------------------------------------------------------------------------
+template <typename Lambda>
+static SmallVector<Value, 4> valueRangeOperatorImpl(Lambda fun, ValueRange a,
+                                                    ValueRange b) {
+  SmallVector<Value, 4> res;
+  res.reserve(std::min(a.size(), b.size()));
+  for (auto it : llvm::zip(a, b))
+    res.push_back(fun(std::get<0>(it), std::get<1>(it)));
+  return res;
+}
+SmallVector<Value, 4> mlir::edsc::extensions::operator-(ValueRange a,
+                                                        ValueRange b) {
+  return valueRangeOperatorImpl(edsc::op::operator-, a, b);
+}
+SmallVector<Value, 4> mlir::edsc::extensions::operator+(ValueRange a,
+                                                        ValueRange b) {
+  return valueRangeOperatorImpl(edsc::op::operator+, a, b);
+}
+SmallVector<Value, 4> mlir::edsc::extensions::std_max(ValueRange a,
+                                                      ValueRange b) {
+  using edsc::op::operator<;
+  auto fun = [](Value va, Value vb) { return (va < vb) ? vb : va; };
+  return valueRangeOperatorImpl(fun, a, b);
+}
+SmallVector<Value, 4> mlir::edsc::extensions::std_min(ValueRange a,
+                                                      ValueRange b) {
+  using edsc::op::operator<;
+  auto fun = [](Value va, Value vb) { return (va < vb) ? va : vb; };
+  return valueRangeOperatorImpl(fun, a, b);
+}
+SmallVector<Value, 4> mlir::edsc::extensions::affine_max(ValueRange a,
+                                                         ValueRange b) {
+  // TODO(ntv): cleanup when affine_max accepts has more idiomatic builders.
+  MLIRContext *ctx = ScopedContext::getContext();
+  auto map = AffineMap::get(
+      2, 0, {getAffineDimExpr(0, ctx), getAffineDimExpr(1, ctx)}, ctx);
+  auto fun = [&](Value va, Value vb) {
+    return intrinsics::affine_max(map, ValueRange{va, vb});
+  };
+  return valueRangeOperatorImpl(fun, a, b);
+}
+SmallVector<Value, 4> mlir::edsc::extensions::affine_min(ValueRange a,
+                                                         ValueRange b) {
+  // TODO(ntv): cleanup when affine_min accepts has more idiomatic builders.
+  MLIRContext *ctx = ScopedContext::getContext();
+  auto map = AffineMap::get(
+      2, 0, {getAffineDimExpr(0, ctx), getAffineDimExpr(1, ctx)}, ctx);
+  auto fun = [&](Value va, Value vb) {
+    return intrinsics::affine_min(map, ValueRange{va, vb});
+  };
+  return valueRangeOperatorImpl(fun, a, b);
 }

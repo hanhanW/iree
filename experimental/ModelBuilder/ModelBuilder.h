@@ -46,15 +46,16 @@
 #define IREE_EXPERIMENTAL_MODELBUILDER_MODELBUILDER_H_
 
 #include "mlir/Dialect/Affine/EDSC/Intrinsics.h"
+#include "mlir/Dialect/GPU/GPUDialect.h"
+#include "mlir/Dialect/Linalg/EDSC/Builders.h"
 #include "mlir/Dialect/Linalg/EDSC/Intrinsics.h"
-#include "mlir/Dialect/LoopOps/EDSC/Builders.h"
+#include "mlir/Dialect/SCF/EDSC/Builders.h"
 #include "mlir/Dialect/StandardOps/EDSC/Intrinsics.h"
 #include "mlir/Dialect/Vector/EDSC/Intrinsics.h"
 
 namespace mlir {
 using edsc::ScopedContext;
 using edsc::StructuredIndexed;
-using edsc::ValueHandle;
 
 // List of MLIR EDSC instrinsics exposed to external clients of ModelBuilder.
 // All other intrinsics are abstracted away via ModelBuilder methods.
@@ -72,8 +73,11 @@ using edsc::intrinsics::vector_print;
 using edsc::ops::vector_contraction;
 using edsc::ops::vector_contraction_matmul;
 // From the Std Dialect.
+using edsc::MemRefBoundsCapture;
+using edsc::VectorBoundsCapture;
 using edsc::intrinsics::std_addf;
 using edsc::intrinsics::std_alloc;
+using edsc::intrinsics::std_call;
 using edsc::intrinsics::std_constant_float;
 using edsc::intrinsics::std_constant_index;
 using edsc::intrinsics::std_dealloc;
@@ -82,6 +86,8 @@ using edsc::intrinsics::std_mulf;
 using edsc::intrinsics::std_ret;
 using edsc::intrinsics::StdIndexedValue;
 // From the Affine Dialect.
+using edsc::intrinsics::affine_max;
+using edsc::intrinsics::affine_min;
 using edsc::intrinsics::AffineIndexedValue;
 // From the Loop Dialect.
 using edsc::AffineLoopNestBuilder;
@@ -89,27 +95,63 @@ using edsc::LoopNestBuilder;
 using edsc::ParallelLoopNestBuilder;
 // -----------------------------------------------------------------------------
 
+// Helper class to simplify MLIR function construction by adding proper
+// attributes, some of which pass through to LLVM.
+struct MLIRFuncOpConfig {
+  // Applies the MLIRFuncOpConfig to `f`.
+  void apply(FuncOp &f);
+
+  // Attributes that pass through to LLVM and modify the behavior of the LLVM
+  // compiler.
+  bool noInline = false;
+  MLIRFuncOpConfig &setNoInline(bool v);
+
+  bool preferAvx512 = false;
+  MLIRFuncOpConfig &setPreferAvx512(bool v);
+
+  std::string targetCpu = "";
+  MLIRFuncOpConfig &setTargetCpu(StringRef s);
+
+  // When true, the function remains body-less. This is good for declaring
+  // external functions.
+  bool declOnly = false;
+  MLIRFuncOpConfig &setDeclOnly(bool v);
+
+  // When true, an mlir_c_iface_xxx shim function is emitted with C compatible
+  // strided memref ABI.
+  bool emitCInterface = false;
+  MLIRFuncOpConfig &setEmitCInterface(bool v);
+};
+
 // Entry point class to build a whole model declaratively with C++ EDSCs.
 class ModelBuilder : public OpBuilder {
  public:
   using OpBuilder::create;
 
-  // Creates a ModelBuilder and sets up an owned MLIRContext, ModuleOp and
+  // Create a ModelBuilder and sets up an owned MLIRContext, ModuleOp and
   // SymbolTable as well as uniqued MLIR types.
   ModelBuilder();
 
+  // Return a reference to the underlying module.
   OwningModuleRef &getModuleRef() { return module; }
 
-  // Build the MLIR representation for an f32 constant.
-  static Value constant_f32(float v);
-
-  // Build the MLIR representation for an f64 constant.
-  static Value constant_f64(double v);
-
   // Build an MLIR FuncOp that will be callable after JIT compilation occured.
-  FuncOp makeFunction(StringRef name, ArrayRef<Type> results = {},
-                      ArrayRef<Type> args = {}, bool emitCInterface = true,
-                      bool declOnly = false);
+  // `config` is a convenience class provided to simplify the configuration of
+  // the function with common attributes that are non-obvious to the newcomer.
+  FuncOp makeFunction(StringRef name, ArrayRef<Type> results,
+                      ArrayRef<Type> args,
+                      MLIRFuncOpConfig config = MLIRFuncOpConfig());
+  FuncOp makeFunction(std::function<std::string(FunctionType)> nameBuilder,
+                      ArrayRef<Type> results, ArrayRef<Type> args,
+                      MLIRFuncOpConfig config = MLIRFuncOpConfig());
+
+  // Build a MLIR GPU module. GPUFuncOp can later be added to the module.
+  gpu::GPUModuleOp makeGPUModule(StringRef name);
+
+  // Build a MLIR GPU kernel within a GPU module.
+  gpu::GPUFuncOp makeGPUKernel(StringRef name, gpu::GPUModuleOp GPUModule,
+                               ArrayRef<Type> args = {},
+                               ArrayRef<Type> results = {});
 
   // Build an MLIR VectorType with a base `elementalType` and a `shape`.
   VectorType getVectorType(ArrayRef<int64_t> shape, Type elementalType);
@@ -130,27 +172,34 @@ class ModelBuilder : public OpBuilder {
   RankedTensorType getRankedTensorType(ArrayRef<int64_t> shape,
                                        Type elementType);
 
+  // Build the MLIR representation for constants of common types.
+  static Value constant_f32(float v);
+  static Value constant_f64(double v);
+  static Value constant_index(int64_t v);
+
   // Build the MLIR representation for:
   //   1. fc(I, W, O)
   //   2. pointwise(O, bias) in-place with explicit bias broadcast to compute:
   //      `0.5f * tanh(0.5f * (x + bias)) + 0.5f`
   // Returns O.
   // Version with a MemRef output argument.
-  ValueHandle FCBiasTanh(std::array<Value, 3> fcArgs, Value biasValueArg);
+  static Value FCBiasTanh(std::array<Value, 3> fcArgs, Value biasValueArg);
   // Version with a RankedTensor result.
-  Value FCBiasTanhTensors(RankedTensorType outputTensorType,
-                          std::array<Value, 2> fcArgs, Value biasValueArg);
+  static Value FCBiasTanhTensors(RankedTensorType outputTensorType,
+                                 std::array<Value, 2> fcArgs,
+                                 Value biasValueArg);
 
   // Build the MLIR representation for:
   //   `0.5f * tanh(0.5f * (x + bias)) + 0.5f`
   // This assumes `x` and `bias` capture scalar MLIR values of type f32.
   // This is used as a region builder when constructing e.g. a pointwise op.
-  static Value fusedBiasTanh(ValueHandle x, ValueHandle bias);
+  static Value fusedBiasTanh(Value x, Value bias);
 
   // ---------------------------------------------------------------------------
   // Support for emitting special function calls.
   // ---------------------------------------------------------------------------
-  static ValueHandle call_tanhf(Value v);
+  static Value call_tanhf(Value v);
+  static void call_print_memref_f32(Value v);  // needs libmlir_runner_utils.so
 
  protected:
   // Helper function to support calling into known functions (e.g. libmath).
@@ -158,8 +207,14 @@ class ModelBuilder : public OpBuilder {
                                                ArrayRef<Type> returnTypes,
                                                ValueRange values);
 
+  // ---------------------------------------------------------------------------
+  // Members.
+  // ---------------------------------------------------------------------------
+ protected:
+  // Thread-safe context owned by ModelBuilder. All IR is built in this context.
   static thread_local MLIRContext ctx;
   mlir::OwningModuleRef module;
+  // The symbol table for the module.
   mlir::SymbolTable symbolTable;
 
  public:
@@ -173,6 +228,32 @@ class ModelBuilder : public OpBuilder {
   FloatType f64;
 };
 
+// -----------------------------------------------------------------------------
+// EDSC extensions.
+// -----------------------------------------------------------------------------
+namespace edsc {
+namespace extensions {
+
+template <typename T>
+SmallVector<Value, 4> std_constant_indices(ArrayRef<T> a) {
+  auto makeIndex = [](int64_t v) { return mlir::std_constant_index(v).value; };
+  return llvm::to_vector<4>(llvm::map_range(a, makeIndex));
+}
+// Build the MLIR representation for op(a, b) for each pair of elements in
+// zip(`a`, `b`).
+SmallVector<Value, 4> operator+(ValueRange a, ValueRange b);
+SmallVector<Value, 4> operator-(ValueRange a, ValueRange b);
+// Build the MLIR representation for select(a cmp b, a, b) for each pair of
+// elements in zip(`a`, `b`).
+SmallVector<Value, 4> std_max(ValueRange a, ValueRange b);
+SmallVector<Value, 4> std_min(ValueRange a, ValueRange b);
+// Build the MLIR representation for affine_cmp(a, b) for each pair of elements
+// in zip(`a`, `b`).
+SmallVector<Value, 4> affine_max(ValueRange a, ValueRange b);
+SmallVector<Value, 4> affine_min(ValueRange a, ValueRange b);
+
+}  // namespace extensions
+}  // namespace edsc
 }  // namespace mlir
 
 #endif  // IREE_EXPERIMENTAL_MODELBUILDER_MODELBUILDER_H_

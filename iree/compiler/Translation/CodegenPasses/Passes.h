@@ -17,8 +17,8 @@
 // IREE specific passes used in the XLA to Linalg conversion
 //
 //===----------------------------------------------------------------------===//
-#ifndef IREE_COMPILER_TRANSLATION_CODEGENPASSES_PASSES_H
-#define IREE_COMPILER_TRANSLATION_CODEGENPASSES_PASSES_H
+#ifndef IREE_COMPILER_TRANSLATION_CODEGENPASSES_PASSES_H_
+#define IREE_COMPILER_TRANSLATION_CODEGENPASSES_PASSES_H_
 #include <memory>
 
 #include "mlir/IR/Function.h"
@@ -27,20 +27,8 @@
 namespace mlir {
 namespace iree_compiler {
 
-/// Populates passes to convert from XLA-HLO to Linalg on buffers as well as
-/// handling some IREE specific conversions (like IREE::LoadInputOp and
-/// IREE::StoreOutputOp). At the end of the pass, the dispatch function will
-/// only contain linalg ops or standard ops if the pipeline succeeds. The pass
-/// manager `pm` passed in here is expected to operate on the module within the
-/// IREE::HAL::ExecutableTargetOp.
-void addHLOToLinalgOnBuffersPasses(OpPassManager &pm);
-
-/// Creates a pass to convert HAL interface on tensors to HAL interface on
-/// memrefs.
-std::unique_ptr<OperationPass<mlir::ModuleOp>> createHALInterfaceToMemrefPass();
-
-/// Creates XLA-HLO preprocessing transformation pass.
-std::unique_ptr<OperationPass<FuncOp>> createHLOPreprocessingPass();
+/// Crates a pass to decompose XLA-HLO clamp ops into primitive ops.
+std::unique_ptr<OperationPass<FuncOp>> createDecomposeHLOClampPass();
 
 /// Creates XLA-HLO to Linalg on buffers transformation pass.
 std::unique_ptr<OperationPass<FuncOp>> createHLOToLinalgOnBuffersPass();
@@ -51,6 +39,10 @@ std::unique_ptr<OperationPass<FuncOp>> createHLOToLinalgOnTensorsPass();
 /// Fuses linalg operations on tensors in dispatch function. For now does only
 /// producer consumer fusion.
 std::unique_ptr<OperationPass<FuncOp>> createLinalgOnTensorsFusionPass();
+
+/// Resolves shape related ops (std.dim, shapex.tie_shape, etc.) by tracing
+/// them back to the original HAL interface bindings.
+std::unique_ptr<OperationPass<FuncOp>> createResolveShapeOpsPass();
 
 /// Populates the patterns that convert from XLA to Linalg on tensors. Imports
 /// patterns from XLA, as well as some IREE specific modifications.
@@ -63,12 +55,23 @@ void populateHLOToLinalgOnTensorsConversionPatterns(
 void populateHLOToLinalgOnBuffersConversionPatterns(
     MLIRContext *context, OwningRewritePatternList &patterns);
 
-/// Populates the patterns that convert from XLA to Linalg on tensors. Imports
-/// patterns from XLA, as well as some IREE specific modifications.
-void populateHLOToLinalgOnTensorsConversionPatterns(
-    MLIRContext *context, OwningRewritePatternList &patterns);
+/// Populates passes to convert from XLA-HLO to Linalg on buffers as well as
+/// handling some IREE specific conversions (like iree.interface.* and
+/// iree.placeholder op). At the end of the pass, the dispatch function will
+/// only contain linalg ops or standard ops if the pipeline succeeds. The pass
+/// manager `pm` passed in here is expected to operate on the module within the
+/// IREE::HAL::ExecutableTargetOp.
+void addHLOToLinalgOnBuffersPasses(OpPassManager &pm);
+
+/// Register all Codegen passes
+inline void registerCodegenPasses() {
+  createDecomposeHLOClampPass();
+  createHLOToLinalgOnBuffersPass();
+  createHLOToLinalgOnTensorsPass();
+  createLinalgOnTensorsFusionPass();
+}
 
 }  // namespace iree_compiler
 }  // namespace mlir
 
-#endif  // IREE_COMPILER_TRANSLATION_CODEGENPASSES_PASSES_H
+#endif  // IREE_COMPILER_TRANSLATION_CODEGENPASSES_PASSES_H_

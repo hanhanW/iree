@@ -30,6 +30,7 @@ developers.
 [iree/compiler/](https://github.com/google/iree/blob/master/iree/compiler/)
 
 *   IREE's MLIR dialects, LLVM compiler passes, module translation code, etc.
+    Code here should not depend on anything in the runtime
 
 [iree/hal/](https://github.com/google/iree/blob/master/iree/hal/)
 
@@ -78,7 +79,7 @@ For example, to run some passes on the
 test file:
 
 ```shell
-$ bazel run //iree/tools:iree-opt -- \
+$ bazel run iree/tools:iree-opt -- \
   -split-input-file \
   -iree-index-computation \
   -simplify-spirv-affine-exprs=false \
@@ -103,11 +104,11 @@ for more information.
 For example, to translate `simple.mlir` to an IREE module:
 
 ```shell
-$ bazel run //iree/tools:iree-translate -- \
+$ bazel run iree/tools:iree-translate -- \
   -iree-mlir-to-vm-bytecode-module \
   --iree-hal-target-backends=vmla \
   $PWD/iree/tools/test/simple.mlir \
-  -o /tmp/module.fb
+  -o /tmp/simple.module
 ```
 
 Custom translations may also be layered on top of `iree-translate`, see
@@ -121,15 +122,37 @@ and executes an exported main function using the provided inputs.
 
 This program can be used in sequence with `iree-translate` to translate a
 `.mlir` file to an IREE module and then execute it. Here is an example command
-that executes the simple `module.fb` compiled from `simple.mlir` above on IREE's
-VMLA driver:
+that executes the simple `simple.module` compiled from `simple.mlir` above on
+IREE's VMLA driver:
 
 ```shell
-$ bazel run //iree/tools:iree-run-module -- \
-  --input_file=/tmp/module.fb \
+$ bazel run iree/tools:iree-run-module -- \
+  --input_file=/tmp/simple.module \
   --driver=vmla \
   --entry_function=abs \
   --inputs="i32=-2"
+```
+
+### iree-check-module
+
+The `iree-check-module` program takes an already translated IREE module as input
+and executes it as a series of
+[googletest](https://github.com/google/googletest) tests. This is the test
+runner for the IREE
+[check framework](https://github.com/google/iree/tree/master/docs/testing_guide.md#end-to-end-tests).
+
+```shell
+$ bazel run iree/tools:iree-translate -- \
+  -iree-mlir-to-vm-bytecode-module \
+  --iree-hal-target-backends=vmla \
+  $PWD/iree/test/e2e/xla_ops/abs.mlir \
+  -o /tmp/abs.module
+```
+
+```shell
+$ bazel run iree/modules/check:iree-check-module -- \
+  /tmp/abs.module \
+  --driver=vmla
 ```
 
 ### iree-run-mlir
@@ -145,7 +168,7 @@ For example, to execute the contents of
 [iree/tools/test/simple.mlir](https://github.com/google/iree/blob/master/iree/tools/test/simple.mlir):
 
 ```shell
-$ bazel run //iree/tools:iree-run-mlir -- \
+$ bazel run iree/tools:iree-run-mlir -- \
   $PWD/iree/tools/test/simple.mlir \
   --input-value="i32=-2" \
   --iree-hal-target-backends=vmla
@@ -159,5 +182,5 @@ file.
 For example, to inspect the module translated above:
 
 ```shell
-$ bazel run //iree/tools:iree-dump-module -- /tmp/module.fb
+$ bazel run iree/tools:iree-dump-module -- /tmp/simple.module
 ```

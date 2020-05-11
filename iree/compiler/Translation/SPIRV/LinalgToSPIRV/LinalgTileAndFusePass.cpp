@@ -17,20 +17,51 @@
 // Implements a pass to tile and fuse linalg operations on buffers.
 //
 //===----------------------------------------------------------------------===//
-#include "iree/compiler/Translation/CodegenUtils/CodegenUtils.h"
+#include "iree/compiler/Translation/CodegenUtils/MarkerUtils.h"
 #include "iree/compiler/Translation/SPIRV/LinalgToSPIRV/Passes.h"
-#include "mlir/Dialect/Linalg/Transforms/LinalgTransforms.h"
+#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
+#include "mlir/Dialect/Linalg/Transforms/Transforms.h"
+#include "mlir/Dialect/SPIRV/TargetAndABI.h"
 #include "mlir/IR/Function.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/FoldUtils.h"
 
+#define DEBUG_TYPE "iree-linalg-tile-and-fuse-buffer"
+
 namespace mlir {
 namespace iree_compiler {
 
-static StringRef getWorkGroupMarker() { return "spirv_workgroup"; }
-
 static constexpr unsigned kMaxWorkgroupRank = 3;
+
+ArrayRef<int64_t> dropTrailingOnes(ArrayRef<int64_t> vector) {
+  if (vector.empty()) return vector;
+  auto numTrailingOnes = 0;
+  for (unsigned i = vector.size() - 1; i > 0; --i) {
+    if (vector[i] != 1) {
+      break;
+    }
+    numTrailingOnes++;
+  }
+  return vector.drop_back(numTrailingOnes);
+}
+
+/// Updates the workgroup size used for the dispatch region.
+LogicalResult updateWorkGroupSize(Operation *op,
+                                  ArrayRef<int64_t> workGroupSize) {
+  // Need to update both the surrounding FuncOp that has the spv.entry_point_abi
+  // attribute, and the hal.executable.
+  FuncOp funcOp =
+      (isa<FuncOp>(op) ? cast<FuncOp>(op) : op->getParentOfType<FuncOp>());
+  MLIRContext *context = op->getContext();
+  SmallVector<int32_t, 3> workGroupSizeVec(llvm::map_range(
+      workGroupSize,
+      [](int64_t value) { return static_cast<int32_t>(value); }));
+  workGroupSizeVec.resize(3, 1);
+  funcOp.setAttr(spirv::getEntryPointABIAttrName(),
+                 spirv::getEntryPointABIAttr(workGroupSizeVec, context));
+  return success();
+}
 
 /// Returns the tile sizes to use by default based on number of dimension of
 /// parallelism.
@@ -91,12 +122,13 @@ static void getTileSizes(unsigned numParallelLoops,
     if (tileSize == 1) tileSize = 0;
 }
 
-/// Checks if an operation already has an attribute with this marker. If set it
-/// implies this op shouldnt be tiled with the same marker.
-static bool hasMarker(Operation *op) {
-  auto tilingAttr = op->getAttrOfType<StringAttr>(
-      linalg::LinalgTransforms::kLinalgTransformMarker);
-  return tilingAttr != nullptr;
+/// Check that all uses of elements of `values` are within the `operation`.
+static bool allUsesInOperation(ArrayRef<Value> values, Operation *operation) {
+  for (auto value : values) {
+    for (auto &use : value.getUses())
+      if (use.getOwner() != operation) return false;
+  }
+  return true;
 }
 
 namespace {
@@ -111,76 +143,41 @@ struct LinalgTileAndFusePass
   SmallVector<int64_t, 3> workGroupSize;
 };
 
-/// Base class for Linalg tiling patterns. All classes that derive from this
-/// need to implement an apply method that will tile the operation with the
-/// following signature.
-///
-/// LogicalResult apply(LinalgOp op, SmallVectorImpl<int64_t> &tileSizes,
-///                     PatternRewriter &rewriter) const
-template <typename DerivedClass, typename LinalgOp>
-struct LinalgTilingPattern : public OpRewritePattern<LinalgOp> {
-  LinalgTilingPattern(MLIRContext *context, ArrayRef<int64_t> tileSizes,
-                      PatternBenefit benefit = 1)
-      : OpRewritePattern<LinalgOp>(context, benefit), tileSizes(tileSizes) {}
+/// Tiling pattern which special cases pooling behavior to account for the fake
+/// memref case.
+template <typename LinalgPoolingOp>
+struct TileLinalgPoolingOpPattern
+    : public linalg::LinalgTilingPattern<LinalgPoolingOp> {
+  TileLinalgPoolingOpPattern(MLIRContext *context,
+                             linalg::LinalgTilingOptions options,
+                             linalg::LinalgMarker marker,
+                             PatternBenefit benefit = 1)
+      : linalg::LinalgTilingPattern<LinalgPoolingOp>(context, options, marker,
+                                                     benefit) {}
 
-  LogicalResult matchAndRewrite(LinalgOp linalgOp,
+  LogicalResult matchAndRewrite(Operation *op,
                                 PatternRewriter &rewriter) const override {
-    if (!linalgOp.hasBufferSemantics()) return failure();
-    // Currently we are only doing one-level tiling, so a single marker is
-    // enough. This might need to move into derived classes.
-    if (hasMarker(linalgOp.getOperation())) return failure();
-
-    if (failed(static_cast<const DerivedClass *>(this)->apply(
-            linalgOp, tileSizes, rewriter)))
-      return failure();
-    rewriter.eraseOp(linalgOp);
-    return success();
-  }
-
- private:
-  ArrayRef<int64_t> tileSizes;
-};
-
-/// If there is nothing to fuse the linalg op with, then just tiles it.
-template <typename LinalgOp>
-struct TileLinalgOpPattern
-    : public LinalgTilingPattern<TileLinalgOpPattern<LinalgOp>, LinalgOp> {
-  using LinalgTilingPattern<TileLinalgOpPattern<LinalgOp>,
-                            LinalgOp>::LinalgTilingPattern;
-  LogicalResult apply(LinalgOp linalgOp, ArrayRef<int64_t> tileSizes,
-                      PatternRewriter &rewriter) const {
-    // Check that all input and outputs have a single use (this op). In that
-    // case, there is nothing to tile and fuse with. So just tile it.
     OpBuilder::InsertionGuard guard(rewriter);
-    rewriter.setInsertionPoint(linalgOp.getOperation());
-    if (!llvm::all_of(linalgOp.getInputsAndOutputBuffers(),
-                      [](Value arg) { return arg.hasOneUse(); }))
-      return failure();
-    return linalg::tileLinalgOpToParallelLoopsAndSetMarker(
-        rewriter, linalgOp.getOperation(), tileSizes, getWorkItemMarker(),
-        /*permutation=*/{});
-  }
-};
+    rewriter.setInsertionPoint(op);
+    // Linalg pooling ops has a fake window_dimension memref that has at least
+    // two uses. However, it doesn't affect because it is just a fake memref.
+    assert(isa<linalg::PoolingMaxOp>(op) || isa<linalg::PoolingMinOp>(op) ||
+           isa<linalg::PoolingSumOp>(op));
 
-/// Tile and fuse linalg operations.
-template <typename LinalgOp>
-struct TileAndFuseLinalgOpPattern
-    : public LinalgTilingPattern<TileAndFuseLinalgOpPattern<LinalgOp>,
-                                 LinalgOp> {
-  using LinalgTilingPattern<TileAndFuseLinalgOpPattern<LinalgOp>,
-                            LinalgOp>::LinalgTilingPattern;
-  LogicalResult apply(LinalgOp linalgOp, ArrayRef<int64_t> tileSizes,
-                      PatternRewriter &rewriter) const {
-    SmallVector<int64_t, 1> operandIndicesToFuse;
-    for (auto buffer : llvm::enumerate(linalgOp.getInputsAndOutputBuffers())) {
-      // If a buffer has multiple uses, then it is a candidate for fusion.
-      if (!buffer.value().hasOneUse())
-        operandIndicesToFuse.push_back(buffer.index());
-    }
-    if (operandIndicesToFuse.empty()) return failure();
-    return linalg::tileAndFuseLinalgOpToParallelLoopsAndSetMarker(
-        rewriter, linalgOp, tileSizes, operandIndicesToFuse,
-        getWorkItemMarker());
+    auto linalgOp = cast<linalg::LinalgOp>(op);
+    auto buffers = linalgOp.getInputsAndOutputBuffers();
+    // The second buffer is a fake memref.
+    if (!(*buffers.begin()).hasOneUse()) return failure();
+    buffers = llvm::drop_begin(buffers, 2);
+
+    // Check that all buffers have uses only in this op. In that case, just
+    // tile the operation.
+    // TODO(ravishankarm) : Use Linalg dependence graph information to make
+    // this decision.
+    for (Value buffer : buffers)
+      if (!allUsesInOperation(buffer, op)) return failure();
+    return linalg::LinalgTilingPattern<LinalgPoolingOp>::matchAndRewrite(
+        linalgOp, rewriter);
   }
 };
 }  // namespace
@@ -188,7 +185,6 @@ struct TileAndFuseLinalgOpPattern
 void LinalgTileAndFusePass::runOnFunction() {
   MLIRContext *context = &getContext();
   FuncOp funcOp = getFunction();
-  if (!isDispatchFuncImpl(funcOp)) return;
 
   Region &body = funcOp.getBody();
   // Only handle single block functions.
@@ -201,7 +197,7 @@ void LinalgTileAndFusePass::runOnFunction() {
   if (linalgOps.empty()) return;
 
   // Compute the minimum number of outer parallel loops across linalg
-  // operations. This gives the dimensionality of tiling to be used .
+  // operations. This gives the dimensionality of tiling to be used.
   unsigned numParallelLoops = kMaxWorkgroupRank;
   for (linalg::LinalgOp op : linalgOps)
     numParallelLoops = std::min(numParallelLoops, getNumOuterParallelLoops(op));
@@ -210,24 +206,30 @@ void LinalgTileAndFusePass::runOnFunction() {
   SmallVector<int64_t, 3> tileSizes;
   getTileSizes(numParallelLoops, workGroupSize, tileSizes);
 
-  OwningRewritePatternList patterns;
-  patterns.insert<TileLinalgOpPattern<linalg::GenericOp>,
-                  TileLinalgOpPattern<linalg::IndexedGenericOp>,
-                  TileLinalgOpPattern<linalg::MatmulOp>,
-                  TileLinalgOpPattern<linalg::ConvOp>,
-                  TileAndFuseLinalgOpPattern<linalg::GenericOp>>(context,
-                                                                 tileSizes);
-  applyPatternsAndFoldGreedily(getOperation(), patterns);
+  LLVM_DEBUG({
+    llvm::dbgs() << "--- IREE Linalg tile and fuse configuration ---\n";
+    llvm::dbgs() << "# parallel loops: " << numParallelLoops;
+    llvm::dbgs() << "\nworkgroup sizes: [";
+    interleaveComma(workGroupSize, llvm::dbgs());
+    llvm::dbgs() << "]\ntile sizes: [";
+    interleaveComma(tileSizes, llvm::dbgs());
+    llvm::dbgs() << "]\n";
+  });
 
-  // Check that there are single loop.parallel operation at the top most level
-  // that will get mapped to thread blocks/workgroups.
-  auto forLoops = block.getOps<loop::ParallelOp>();
-  if (numParallelLoops > 0 && !llvm::hasSingleElement(forLoops) &&
-      (*forLoops.begin()).getNumLoops() != numParallelLoops) {
-    funcOp.emitError(
-        "unable to generate the tiled loop structure to map to workgroups");
-    return signalPassFailure();
-  }
+  OwningRewritePatternList patterns;
+  patterns.insert<linalg::LinalgTilingPattern<linalg::ConvOp>,
+                  linalg::LinalgTilingPattern<linalg::CopyOp>,
+                  linalg::LinalgTilingPattern<linalg::GenericOp>,
+                  linalg::LinalgTilingPattern<linalg::IndexedGenericOp>,
+                  linalg::LinalgTilingPattern<linalg::MatmulOp>,
+                  TileLinalgPoolingOpPattern<linalg::PoolingMaxOp>,
+                  TileLinalgPoolingOpPattern<linalg::PoolingMinOp>,
+                  TileLinalgPoolingOpPattern<linalg::PoolingSumOp>>(
+      context,
+      linalg::LinalgTilingOptions().setTileSizes(tileSizes).setLoopType(
+          linalg::LinalgTilingLoopType::ParallelLoops),
+      linalg::LinalgMarker(getWorkItemMarker()));
+  applyPatternsAndFoldGreedily(getOperation(), patterns);
 
   // Update the workgroup size to be consistent with the tile sizes used. Note
   // the tile sizes are ordered from outer most to inner most loops. The
@@ -246,7 +248,8 @@ std::unique_ptr<OperationPass<FuncOp>> createLinalgTileAndFusePass(
 }
 
 static PassRegistration<LinalgTileAndFusePass> pass(
-    "iree-linalg-tile-and-fuse", "Tile and fuse Linalg operations on buffers",
+    "iree-codegen-linalg-tile-and-fuse",
+    "Tile and fuse Linalg operations on buffers",
     [] { return std::make_unique<LinalgTileAndFusePass>(); });
 }  // namespace iree_compiler
 }  // namespace mlir

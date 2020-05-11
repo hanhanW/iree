@@ -52,7 +52,7 @@ void buildHALTransformPassPipeline(OpPassManager &passManager,
 //===----------------------------------------------------------------------===//
 
 // Outlines hal.device.switch conditions into functions and inlines conditions.
-std::unique_ptr<OperationPass<ModuleOp>> createOutlineDeviceSwitchesPass();
+std::unique_ptr<OperationPass<FuncOp>> createInlineDeviceSwitchesPass();
 
 // Finds hal.device.query ops and creates variables initialized on startup.
 std::unique_ptr<OperationPass<ModuleOp>> createMemoizeDeviceQueriesPass();
@@ -66,13 +66,6 @@ std::unique_ptr<OperationPass<ModuleOp>> createMemoizeDeviceQueriesPass();
 // device placements are made.
 std::unique_ptr<OperationPass<ModuleOp>> createMaterializeInterfacesPass(
     TargetOptions executableOptions);
-
-// Rewrites hal.interface IO shims to look like the legacy IREE
-// load_input/store_output form. This is incompatible with dynamic shapes and
-// advanced descriptor set usage and will be removed as soon as the existing
-// backends using it are ported to hal.interface.
-std::unique_ptr<OperationPass<IREE::Flow::ExecutableOp>>
-createRewriteLegacyIOPass();
 
 // Translates hal.executable.target ops via a nested translation pipeline.
 std::unique_ptr<OperationPass<IREE::HAL::ExecutableOp>>
@@ -110,10 +103,9 @@ std::unique_ptr<OperationPass<ModuleOp>> createMaterializeResourceCachesPass(
 
 inline void registerHALPasses() {
   auto executableOptions = getTargetOptionsFromFlags();
-  createOutlineDeviceSwitchesPass();
+  createInlineDeviceSwitchesPass();
   createMemoizeDeviceQueriesPass();
   createMaterializeInterfacesPass(executableOptions);
-  createRewriteLegacyIOPass();
   createTranslateExecutablesPass(executableOptions);
   createLinkExecutablesPass(executableOptions);
   createSerializeExecutablesPass(executableOptions);

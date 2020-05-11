@@ -15,6 +15,7 @@
 # Tests for end-to-end IREE support starting from the XLA HLO dialect.
 
 load("//iree:lit_test.bzl", "iree_lit_test_suite")
+load("//iree:build_defs.oss.bzl", "IREE_DRIVER_MODULES", "PLATFORM_VULKAN_DEPS")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -28,12 +29,17 @@ iree_lit_test_suite(
         exclude = ["Bench*"],
     ),
     data = [
+        # runtime libraries
+        "@llvm-project//mlir:tools/libvulkan-runtime-wrappers.so",
+        "@llvm-project//mlir/test/mlir-cpu-runner:libmlir_runner_utils.so",
         ":runtime-support.so",
         # Tests.
         ":test-dot-prod",
         ":test-mnist-jit",
         ":test-simple-jit",
+        ":test-simple-jit-vulkan",
         ":test-simple-mlir",
+        ":test-vector-transfers-jit",
         # FileChecker.
         "//iree/tools:IreeFileCheck",
     ],
@@ -49,6 +55,23 @@ cc_binary(
         "noga",
     ],
     deps = [
+        "//experimental/ModelBuilder",
+        "//experimental/ModelBuilder:ModelRunner",
+        "@llvm-project//llvm:support",
+        "@llvm-project//mlir:AllPassesAndDialects",
+        "@llvm-project//mlir:EDSC",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:SCFTransforms",
+    ],
+)
+
+cc_binary(
+    name = "test-vector-transfers-jit",
+    srcs = ["TestVectorTransfersJIT.cpp"],
+    tags = [
+        "noga",
+    ],
+    deps = [
         ":runtime-support.so",
         "//experimental/ModelBuilder",
         "//experimental/ModelBuilder:ModelRunner",
@@ -56,7 +79,7 @@ cc_binary(
         "@llvm-project//mlir:AllPassesAndDialects",
         "@llvm-project//mlir:EDSC",
         "@llvm-project//mlir:IR",
-        "@llvm-project//mlir:LoopOpsTransforms",
+        "@llvm-project//mlir:SCFTransforms",
     ],
 )
 
@@ -72,7 +95,7 @@ cc_binary(
         "@llvm-project//mlir:AllPassesAndDialects",
         "@llvm-project//mlir:EDSC",
         "@llvm-project//mlir:IR",
-        "@llvm-project//mlir:LoopOpsTransforms",
+        "@llvm-project//mlir:SCFTransforms",
         # mlir_runner_utils with iostream needed for printMemRef atm
         "@llvm-project//mlir:mlir_runner_utils",
     ],
@@ -91,8 +114,26 @@ cc_binary(
         "@llvm-project//mlir:AllPassesAndDialects",
         "@llvm-project//mlir:EDSC",
         "@llvm-project//mlir:IR",
-        "@llvm-project//mlir:LoopOpsTransforms",
+        "@llvm-project//mlir:SCFTransforms",
     ],
+)
+
+cc_binary(
+    name = "test-simple-jit-vulkan",
+    srcs = ["TestSimpleJITVulkan.cpp"],
+    tags = [
+        "noga",
+    ],
+    deps = [
+        "//experimental/ModelBuilder",
+        "//experimental/ModelBuilder:ModelRunner",
+        "//iree/base:initializer",
+        "@llvm-project//llvm:support",
+        "@llvm-project//mlir:AllPassesAndDialects",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Parser",
+        "@llvm-project//mlir:SPIRVDialect",
+    ] + PLATFORM_VULKAN_DEPS + IREE_DRIVER_MODULES,
 )
 
 cc_binary(

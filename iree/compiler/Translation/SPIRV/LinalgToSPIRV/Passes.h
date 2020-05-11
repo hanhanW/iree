@@ -12,23 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef IREE_COMPILER_TRANSLATION_SPIRV_LINALGTOSPIRV_PASSES_H
-#define IREE_COMPILER_TRANSLATION_SPIRV_LINALGTOSPIRV_PASSES_H
+#ifndef IREE_COMPILER_TRANSLATION_SPIRV_LINALGTOSPIRV_PASSES_H_
+#define IREE_COMPILER_TRANSLATION_SPIRV_LINALGTOSPIRV_PASSES_H_
 
 #include "mlir/Pass/Pass.h"
 
 namespace mlir {
 namespace iree_compiler {
-
-///--------------------------------------------------------------------------///
-// Markers on Linalg operations that determine which processor heirarchy to use
-// for partitioning
-///--------------------------------------------------------------------------///
-
-/// Marker to denote that a linalg operation is to be partitioned to workitems
-inline StringRef getWorkItemMarker() { return "workitem"; }
-
-///--------------------------------------------------------------------------///
 
 /// Pass to tile and fuse linalg operations on buffers. The pass takes as
 /// argument the `workgroupSize` that the tiling should use. Note that the
@@ -41,9 +31,15 @@ std::unique_ptr<OperationPass<FuncOp>> createLinalgTileAndFusePass(
 
 /// Pass to add the synchronizations and attributes needed to lower from PLoops
 /// to GPU dialect.
-std::unique_ptr<OperationPass<ModuleOp>> createConvertToGPUPass();
+std::unique_ptr<OperationPass<FuncOp>> createConvertToGPUPass();
+
+/// Pass to perform the final conversion to SPIR-V dialect.
+/// This pass converts remaining interface ops into SPIR-V global variables,
+/// GPU processor ID ops into SPIR-V global variables, loop/standard ops into
+/// corresponding SPIR-V ops.
+std::unique_ptr<OperationPass<ModuleOp>> createConvertToSPIRVPass();
 
 }  // namespace iree_compiler
 }  // namespace mlir
 
-#endif
+#endif  // IREE_COMPILER_TRANSLATION_SPIRV_LINALGTOSPIRV_PASSES_H_

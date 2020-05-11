@@ -42,7 +42,9 @@ void testVectorAdd1d(StringLiteral funcName, unsigned kNumElements) {
 
   // 1. Build a simple vector_add.
   {
-    auto f = modelBuilder.makeFunction(funcName, {}, {typeA, typeB, typeC});
+    auto f =
+        modelBuilder.makeFunction(funcName, {}, {typeA, typeB, typeC},
+                                  MLIRFuncOpConfig().setEmitCInterface(true));
     OpBuilder b(&f.getBody());
     ScopedContext scope(b, f.getLoc());
 
@@ -51,9 +53,9 @@ void testVectorAdd1d(StringLiteral funcName, unsigned kNumElements) {
     auto last = std_constant_index(kNumElements - 1);
     C(last) = A(last) + B(last);
 
-    (vector_print(*A(last)));
-    (vector_print(*B(last)));
-    (vector_print(*C(last)));
+    (vector_print(A(last)));
+    (vector_print(B(last)));
+    (vector_print(C(last)));
 
     std_ret();
   }
@@ -98,7 +100,9 @@ void testVectorAdd2d(StringLiteral funcName, unsigned kNumElements) {
 
   // 1. Build a simple vector_add.
   {
-    auto f = modelBuilder.makeFunction(funcName, {}, {typeA, typeB, typeC});
+    auto f =
+        modelBuilder.makeFunction(funcName, {}, {typeA, typeB, typeC},
+                                  MLIRFuncOpConfig().setEmitCInterface(true));
     OpBuilder b(&f.getBody());
     ScopedContext scope(b, f.getLoc());
 
@@ -107,9 +111,9 @@ void testVectorAdd2d(StringLiteral funcName, unsigned kNumElements) {
     auto last = std_constant_index(kNumElements - 1);
     C(last) = A(last) + B(last);
 
-    (vector_print(*A(last)));
-    (vector_print(*B(last)));
-    (vector_print(*C(last)));
+    (vector_print(A(last)));
+    (vector_print(B(last)));
+    (vector_print(C(last)));
 
     std_ret();
   }
@@ -158,12 +162,13 @@ void testMatmulOnVectors(StringLiteral funcName) {
   auto mnVectorType = modelBuilder.getVectorType({M, N}, f32);
   auto typeC = modelBuilder.getMemRefType({-1, -1}, mnVectorType);
 
-  auto func = modelBuilder.makeFunction(funcName, {}, {typeA, typeB, typeC});
+  auto func =
+      modelBuilder.makeFunction(funcName, {}, {typeA, typeB, typeC},
+                                MLIRFuncOpConfig().setEmitCInterface(true));
 
   OpBuilder b(&func.getBody());
   ScopedContext scope(b, func.getLoc());
-  ValueHandle A(func.getArgument(0)), B(func.getArgument(1)),
-      C(func.getArgument(2));
+  Value A(func.getArgument(0)), B(func.getArgument(1)), C(func.getArgument(2));
   auto contractionBuilder = [](ArrayRef<BlockArgument> args) {
     assert(args.size() == 3 && "expected 3 block arguments");
     (linalg_yield(vector_contraction_matmul(args[0], args[1], args[2])));

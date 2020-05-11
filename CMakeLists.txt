@@ -43,6 +43,12 @@ option(IREE_BUILD_DEBUGGER "Builds the IREE debugger app." OFF)
 option(IREE_BUILD_PYTHON_BINDINGS "Builds the IREE python bindings" OFF)
 option(IREE_BUILD_EXPERIMENTAL "Builds experimental projects." OFF)
 
+#TODO: Make this functional!
+set(IREE_HAL_DRIVERS_TO_BUILD "all"
+  CACHE STRING "Semicolon-separated list of HAL drivers to build, or \"all\"." FORCE)
+set(IREE_TARGET_BACKENDS_TO_BUILD "all"
+  CACHE STRING "Semicolon-separated list of target backends to build, or \"all\"." FORCE)
+
 if(${IREE_BUILD_SAMPLES} OR ${IREE_BUILD_EXPERIMENTAL})
   set(IREE_BUILD_COMPILER ON CACHE BOOL "Build the IREE compiler for sample projects." FORCE)
 endif()
@@ -54,6 +60,56 @@ endif()
 #-------------------------------------------------------------------------------
 # IREE-specific CMake configuration
 #-------------------------------------------------------------------------------
+
+# List of all HAL drivers to be built by default:
+set(IREE_ALL_HAL_DRIVERS
+  LLVM
+  Vulkan
+  VMLA
+)
+
+if( IREE_HAL_DRIVERS_TO_BUILD STREQUAL "all" )
+  set( IREE_HAL_DRIVERS_TO_BUILD ${IREE_ALL_HAL_DRIVERS} )
+endif()
+message(STATUS "Building HAL drivers ${IREE_HAL_DRIVERS_TO_BUILD}")
+
+# Default every IREE_HAL_DRIVER_* to OFF
+foreach(_backend ${IREE_ALL_HAL_DRIVERS})
+  string(TOUPPER "${_backend}" uppercase_backend)
+  set(IREE_HAL_DRIVER_${uppercase_backend} OFF CACHE BOOL "" FORCE)
+endforeach()
+
+# Set IREE_HAL_DRIVER_* based on configuration
+foreach(_backend ${IREE_HAL_DRIVERS_TO_BUILD})
+  string(TOUPPER "${_backend}" uppercase_backend)
+  set(IREE_HAL_DRIVER_${uppercase_backend} ON CACHE BOOL "" FORCE)
+endforeach()
+
+
+# List of all target backends to be built by default:
+set(IREE_ALL_TARGET_BACKENDS
+  LLVMIR
+  Vulkan_SPIRV
+  VMLA
+)
+
+if( IREE_TARGET_BACKENDS_TO_BUILD STREQUAL "all" )
+  set( IREE_TARGET_BACKENDS_TO_BUILD ${IREE_ALL_TARGET_BACKENDS} )
+endif()
+message(STATUS "Building target backends ${IREE_TARGET_BACKENDS_TO_BUILD}")
+
+# Default every IREE_TARGET_BACKEND_* to OFF
+foreach(_backend ${IREE_ALL_TARGET_BACKENDS})
+  string(TOUPPER "${_backend}" uppercase_backend)
+  set(IREE_TARGET_BACKEND_${uppercase_backend} OFF CACHE BOOL "" FORCE)
+endforeach()
+
+# Set IREE_TARGET_BACKEND_* based on configuration
+foreach(_backend ${IREE_TARGET_BACKENDS_TO_BUILD})
+  string(TOUPPER "${_backend}" uppercase_backend)
+  set(IREE_TARGET_BACKEND_${uppercase_backend} ON CACHE BOOL "" FORCE)
+endforeach()
+
 
 list(APPEND CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_LIST_DIR}/build_tools/cmake/
@@ -75,7 +131,6 @@ include(iree_py_extension)
 include(iree_py_library)
 include(iree_py_test)
 include(iree_lit_test)
-include(iree_alwayslink)
 include(iree_add_all_subdirs)
 include(iree_check_test)
 
@@ -141,7 +196,6 @@ if(${IREE_ENABLE_LLVM})
   endif()
 
   add_subdirectory(third_party/llvm-project/llvm EXCLUDE_FROM_ALL)
-  set_alwayslink_mlir_libs()
 
   # Reset CMAKE_BUILD_TYPE to its previous setting
   set(CMAKE_BUILD_TYPE "${_CMAKE_BUILD_TYPE}" CACHE STRING "Build type (default ${DEFAULT_CMAKE_BUILD_TYPE})" FORCE)
@@ -151,7 +205,6 @@ endif()
 
 if(${IREE_BUILD_COMPILER})
   add_subdirectory(build_tools/third_party/tensorflow/tensorflow/compiler/mlir/xla EXCLUDE_FROM_ALL)
-  set_alwayslink_tensorflow_libs()
 endif()
 
 if(${IREE_BUILD_DEBUGGER} OR ${IREE_BUILD_SAMPLES})
@@ -208,6 +261,7 @@ if(${IREE_BUILD_COMPILER})
 elseif(${IREE_ENABLE_LLVM})
   # If not building the compiler, tablegen is still needed
   # to generate vm ops so deep include it only.
+  add_subdirectory(iree/compiler/Dialect/IREE/Tools)
   add_subdirectory(iree/compiler/Dialect/VM/Tools)
 endif()
 

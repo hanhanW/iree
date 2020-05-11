@@ -25,6 +25,7 @@ cc_library(
     ],
     hdrs = [
         "Dispatchability.h",
+        "TestPasses.h",
     ],
     deps = [
         "//iree/compiler/Dialect/Flow/IR",
@@ -37,5 +38,4 @@ cc_library(
         "@llvm-project//mlir:Support",
         "@org_tensorflow//tensorflow/compiler/mlir/xla:hlo",
     ],
-    alwayslink = 1,
 )

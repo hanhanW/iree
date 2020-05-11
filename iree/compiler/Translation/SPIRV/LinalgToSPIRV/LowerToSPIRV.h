@@ -12,31 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef IREE_COMPILER_TRANSLATION_SPIRV_LINALGTOSPIRV_LOWERTOSPIRV_H
-#define IREE_COMPILER_TRANSLATION_SPIRV_LINALGTOSPIRV_LOWERTOSPIRV_H
+#ifndef IREE_COMPILER_TRANSLATION_SPIRV_LINALGTOSPIRV_LOWERTOSPIRV_H_
+#define IREE_COMPILER_TRANSLATION_SPIRV_LINALGTOSPIRV_LOWERTOSPIRV_H_
 
-#include "mlir/Pass/Pass.h"
+#include "mlir/Pass/PassManager.h"
 
 namespace mlir {
 namespace iree_compiler {
 
-/// Populates passes needed to lower a XLA HLO op to SPIR-V dialect through
-/// Linalg dialect. The pass manager `pm` in here operate on the module within
-/// the IREE::HAL::ExecutableOp. The `workGroupSize` can be used to control the
-/// work group size used in the code-generation and is intended for testing
-/// purposes only. The pass pipeline will set an appropriate workgroup size.
-void addHLOToLinalgToSPIRVPasses(OpPassManager &pm,
-                                 ArrayRef<int64_t> workGroupSize = {});
-
-/// Populates passes needed to lower a linalg op (on buffers) to SPIR-V dialect.
-/// The pass manager `pm` in here operate on the module within the
-/// IREE::HAL::ExecutableOp. The `workGroupSize` can be used to control the work
-/// group size used in the code-generation and is intended for testing purposes
-/// only. The pass pipeline will set an appropriate workgroup size.
-void addLinalgToSPIRVPasses(OpPassManager &pm,
-                            ArrayRef<int64_t> workGroupSize = {});
+/// Populates passes needed to lower a XLA HLO op to SPIR-V dialect via the
+/// structured ops path. The pass manager `pm` in here operate on the module
+/// within the IREE::HAL::ExecutableOp. The `workGroupSize` can be used to
+/// control the work group size used in the code generation and is intended for
+/// testing purposes only. The pass pipeline will set an appropriate workgroup
+/// size.
+void buildSPIRVTransformPassPipeline(OpPassManager &pm,
+                                     ArrayRef<int64_t> workGroupSize);
 
 }  // namespace iree_compiler
 }  // namespace mlir
 
-#endif  // IREE_COMPILER_TRANSLATION_SPIRV_XLATOLINALGSPIRV_LOWERTOSPIRV_H
+#endif  // IREE_COMPILER_TRANSLATION_SPIRV_XLATOLINALGSPIRV_LOWERTOSPIRV_H_

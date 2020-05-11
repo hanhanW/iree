@@ -37,6 +37,7 @@ iree_cc_library(
     MLIRSupport
     MLIRTransforms
     iree::compiler::Dialect::Shape::IR
+    iree::compiler::Dialect::Shape::Plugins::VMLA::VMLAShapeBuilder
     iree::compiler::Dialect::Shape::Plugins::XLA::XlaHloShapeBuilder
     iree::compiler::Dialect::Shape::Utils::TypeConversion
     iree::compiler::Utils

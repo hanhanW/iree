@@ -17,14 +17,14 @@
 // Partition computation within dispatch function to workgroups/workitems.
 //
 //===----------------------------------------------------------------------===//
-#include "iree/compiler/Translation/CodegenUtils/CodegenUtils.h"
+#include "iree/compiler/Translation/CodegenUtils/MarkerUtils.h"
 #include "iree/compiler/Translation/SPIRV/LinalgToSPIRV/Passes.h"
 #include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/GPU/GPUDialect.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
-#include "mlir/Dialect/Linalg/Transforms/LinalgTransforms.h"
-#include "mlir/Dialect/LoopOps/LoopOps.h"
+#include "mlir/Dialect/Linalg/Transforms/Transforms.h"
+#include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Dialect/SPIRV/TargetAndABI.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/IR/AffineMap.h"
@@ -37,33 +37,17 @@ namespace mlir {
 namespace iree_compiler {
 
 //===----------------------------------------------------------------------===//
-// Utility functions used in the conversion
+// Loop utilities
 //===----------------------------------------------------------------------===//
 
 /// Builds an empty loop.for operation. The default builder adds an entry basic
 /// block which needs to be avoided here.
-static loop::ForOp buildEmptyForOp(Location loc, OpBuilder &builder, Value lb,
-                                   Value ub, Value step) {
-  OperationState state(loc, loop::ForOp::getOperationName());
+static scf::ForOp buildEmptyForOp(Location loc, OpBuilder &builder, Value lb,
+                                  Value ub, Value step) {
+  OperationState state(loc, scf::ForOp::getOperationName());
   state.addOperands({lb, ub, step});
   state.addRegion();
-  return cast<loop::ForOp>(builder.createOperation(state));
-}
-
-/// Builds an empty gpu.func operation. The default method always adds entry
-/// block.
-static gpu::GPUFuncOp buildEmptyGPUFuncOp(Location loc, OpBuilder &builder,
-                                          StringRef name, FunctionType type) {
-  OperationState state(loc, gpu::GPUFuncOp::getOperationName());
-  state.addAttribute(SymbolTable::getSymbolAttrName(),
-                     builder.getStringAttr(name));
-  state.addAttribute(gpu::GPUFuncOp::getTypeAttrName(), TypeAttr::get(type));
-  state.addAttribute(gpu::GPUDialect::getKernelFuncAttrName(),
-                     builder.getUnitAttr());
-  state.addAttribute(gpu::GPUFuncOp::getNumWorkgroupAttributionsAttrName(),
-                     builder.getI64IntegerAttr(0));
-  state.addRegion();
-  return cast<gpu::GPUFuncOp>(builder.createOperation(state));
+  return cast<scf::ForOp>(builder.createOperation(state));
 }
 
 namespace {
@@ -82,7 +66,7 @@ struct LoopBounds {
 /// `permutation` vector contains a mapping from the original loop order, to the
 /// loop order to be generated.
 static Operation *replacePLoopOp(ConversionPatternRewriter &rewriter,
-                                 loop::ParallelOp pLoopOp,
+                                 scf::ParallelOp pLoopOp,
                                  ArrayRef<LoopBounds> newPLoopBounds,
                                  ArrayRef<LoopBounds> forBounds,
                                  ArrayRef<unsigned> permutation) {
@@ -108,7 +92,7 @@ static Operation *replacePLoopOp(ConversionPatternRewriter &rewriter,
         newPLoopBounds, [](LoopBounds bounds) { return bounds.ub; }));
     auto steps = llvm::to_vector<2>(llvm::map_range(
         newPLoopBounds, [](LoopBounds bounds) { return bounds.step; }));
-    auto newPLoop = rewriter.create<loop::ParallelOp>(loc, lbs, ubs, steps);
+    auto newPLoop = rewriter.create<scf::ParallelOp>(loc, lbs, ubs, steps);
     for (auto iv : newPLoop.getInductionVars()) {
       signatureConverter.remapInput(*permuteIt, iv);
       permuteIt++;
@@ -121,7 +105,7 @@ static Operation *replacePLoopOp(ConversionPatternRewriter &rewriter,
   for (auto it : enumerate(forBounds)) {
     Value lb = it.value().lb, ub = it.value().ub, step = it.value().step;
     if (it.index() != forBounds.size() - 1) {
-      auto forOp = rewriter.create<loop::ForOp>(loc, lb, ub, step);
+      auto forOp = rewriter.create<scf::ForOp>(loc, lb, ub, step);
       if (!outermostLoop) outermostLoop = forOp.getOperation();
       signatureConverter.remapInput(*permuteIt, forOp.getInductionVar());
       rewriter.setInsertionPointToStart(forOp.getBody());
@@ -148,7 +132,7 @@ static Operation *replacePLoopOp(ConversionPatternRewriter &rewriter,
 /// dimension.
 // TODO(ravishankarm): Move this into LoopUtils.h in MLIR.
 static Operation *serializeDimensions(ConversionPatternRewriter &rewriter,
-                                      loop::ParallelOp pLoopOp,
+                                      scf::ParallelOp pLoopOp,
                                       ArrayRef<unsigned> serializedDimensions) {
   assert(!serializedDimensions.empty() &&
          "unhandled corner case of no serializing dims");
@@ -178,7 +162,7 @@ static Operation *serializeDimensions(ConversionPatternRewriter &rewriter,
 
 /// Serialize all inner dimensions of a `pLoopOp` starting from `serializeFrom`.
 static Operation *serializeDimensionsFrom(ConversionPatternRewriter &rewriter,
-                                          loop::ParallelOp pLoopOp,
+                                          scf::ParallelOp pLoopOp,
                                           unsigned serializeFrom) {
   unsigned numLoops = pLoopOp.getNumLoops();
   assert(serializeFrom > 0 && "unhandled serializaing all dimensions");
@@ -190,6 +174,10 @@ static Operation *serializeDimensionsFrom(ConversionPatternRewriter &rewriter,
   return serializeDimensions(rewriter, pLoopOp, serializedDimensions);
 }
 
+//===----------------------------------------------------------------------===//
+// GPU processor ID mapping utilities
+//===----------------------------------------------------------------------===//
+
 /// Distribute loop.parallel to processors with the processors logically
 /// arranged with same dimensionality as the number of loops, i.e. a
 /// loop.parallel with 2 loops to a 2D grid of processors. `processorIDs` and
@@ -197,12 +185,12 @@ static Operation *serializeDimensionsFrom(ConversionPatternRewriter &rewriter,
 /// values to use for process ID and number of processors along each dimension
 /// in the distributed code.
 static LogicalResult mapToProcessors(ConversionPatternRewriter &rewriter,
-                                     loop::ParallelOp pLoopOp,
+                                     scf::ParallelOp pLoopOp,
                                      ArrayRef<Value> processorIDs,
                                      ArrayRef<Value> numProcessors) {
   unsigned numLoops = pLoopOp.getNumLoops();
   assert(numLoops == processorIDs.size() &&
-         "expected as many pids as number of loops");
+         "expected as many ids as number of loops");
   assert(numLoops == numProcessors.size() &&
          "expected as many nprocs as number of loops");
   SmallVector<LoopBounds, 2> forBounds;
@@ -224,52 +212,89 @@ static LogicalResult mapToProcessors(ConversionPatternRewriter &rewriter,
   return success();
 }
 
+namespace {
+struct ProcessorIdAndCount {
+  Value id;
+  Value count;
+};
+
+/// These are class declarations that are only used for template
+/// specialization. They wont be needed if GPU dialect has ops for global
+/// invocation ID directly.
+class GPUGlobalId;
+class GPUGlobalCount;
+}  // namespace
+
+template <typename GPUIdOp, typename GPUCountOp>
+static ProcessorIdAndCount getGPUProcessorIdAndCount(
+    Location loc, StringRef dim, ConversionPatternRewriter &rewriter) {
+  Type indexType = rewriter.getIndexType();
+  return {
+      rewriter.create<GPUIdOp>(loc, indexType, rewriter.getStringAttr(dim)),
+      rewriter.create<GPUCountOp>(loc, indexType, rewriter.getStringAttr(dim))};
+}
+
+template <>
+ProcessorIdAndCount getGPUProcessorIdAndCount<GPUGlobalId, GPUGlobalCount>(
+    Location loc, StringRef dim, ConversionPatternRewriter &rewriter) {
+  Type indexType = rewriter.getIndexType();
+  Value gridDim = rewriter.create<gpu::GridDimOp>(loc, indexType,
+                                                  rewriter.getStringAttr(dim));
+  Value blockId = rewriter.create<gpu::BlockIdOp>(loc, indexType,
+                                                  rewriter.getStringAttr(dim));
+  Value blockDim = rewriter.create<gpu::BlockDimOp>(
+      loc, indexType, rewriter.getStringAttr(dim));
+  Value threadId = rewriter.create<gpu::ThreadIdOp>(
+      loc, indexType, rewriter.getStringAttr(dim));
+  return {rewriter.create<AddIOp>(
+              loc, rewriter.create<MulIOp>(loc, blockId, blockDim), threadId),
+          rewriter.create<MulIOp>(loc, blockDim, gridDim)};
+}
+
 /// Distribute loop.parallel to processors where `IdOp` is used to get the
 /// processor ID and `DimOp` is used to get the number of processors along a
 /// dimension.
-template <typename IdOp, typename DimOp>
+template <typename GPUIdOp, typename GPUCountOp>
 static LogicalResult mapToProcessor(ConversionPatternRewriter &rewriter,
-                                    loop::ParallelOp pLoopOp) {
+                                    scf::ParallelOp pLoopOp) {
   unsigned numLoops = pLoopOp.getNumLoops();
-  if (numLoops > 3)
+  if (numLoops > 3) {
     pLoopOp =
-        cast<loop::ParallelOp>(serializeDimensionsFrom(rewriter, pLoopOp, 3));
-  SmallVector<Value, 2> pid, nprocs;
-  pid.reserve(numLoops);
-  nprocs.reserve(numLoops);
+        cast<scf::ParallelOp>(serializeDimensionsFrom(rewriter, pLoopOp, 3));
+    numLoops = 3;
+  }
+  SmallVector<Value, 2> id, count;
+  id.reserve(numLoops);
+  count.reserve(numLoops);
+  ArrayRef<StringRef> dims = {"x", "y", "z"};
   Location loc = pLoopOp.getLoc();
-  auto createIdAndNprocs = [&](StringRef dim) {
-    pid.insert(pid.begin(), rewriter.create<IdOp>(loc, rewriter.getIndexType(),
-                                                  rewriter.getStringAttr(dim)));
-    nprocs.insert(nprocs.begin(),
-                  rewriter.create<DimOp>(loc, rewriter.getIndexType(),
-                                         rewriter.getStringAttr(dim)));
-  };
-  createIdAndNprocs("x");
-  if (numLoops > 1) createIdAndNprocs("y");
-  if (numLoops > 2) createIdAndNprocs("z");
-  return mapToProcessors(rewriter, pLoopOp, pid, nprocs);
+  for (unsigned i = 0; i < numLoops; ++i) {
+    ProcessorIdAndCount idAndCount =
+        getGPUProcessorIdAndCount<GPUIdOp, GPUCountOp>(loc, dims[i], rewriter);
+    id.insert(id.begin(), idAndCount.id);
+    count.insert(count.begin(), idAndCount.count);
+  }
+  return mapToProcessors(rewriter, pLoopOp, id, count);
 }
 
 /// Distribute the loop.parallel to workgroups.
 static LogicalResult mapToWorkgroups(ConversionPatternRewriter &rewriter,
-                                     loop::ParallelOp pLoopOp) {
+                                     scf::ParallelOp pLoopOp) {
   return mapToProcessor<gpu::BlockIdOp, gpu::GridDimOp>(rewriter, pLoopOp);
 }
 
-/// Distribute loop.parallel to workitems.
-static LogicalResult mapToWorkitems(ConversionPatternRewriter &rewriter,
-                                    loop::ParallelOp pLoopOp) {
+/// Distribute loop.parallel to workitems using local invocation ID.
+static LogicalResult mapToLocalInvocationId(ConversionPatternRewriter &rewriter,
+                                            scf::ParallelOp pLoopOp) {
   return mapToProcessor<gpu::ThreadIdOp, gpu::BlockDimOp>(rewriter, pLoopOp);
 }
 
-/// Check if the linalg operation has the specified attribute (set during
-/// tiling to denote what processor heirarchy executes this operation).
-template <typename LinalgOpTy>
-bool checkMarkerValue(LinalgOpTy linalgOp, StringRef marker = "") {
-  auto attr = linalgOp.template getAttrOfType<StringAttr>(
-      linalg::LinalgTransforms::kLinalgTransformMarker);
-  return attr && (marker == "" || attr.getValue() == marker);
+/// Distribute loop.parallel to workitems using global invocation ID. The GPU
+/// dialect doesn't have a direct operation to do this. This could be done using
+/// id = blockIdx * blockDim + gridIdx. count = blockDim * gridDim.
+static LogicalResult mapToGlobalInvocationId(
+    ConversionPatternRewriter &rewriter, scf::ParallelOp pLoopOp) {
+  return mapToProcessor<GPUGlobalId, GPUGlobalCount>(rewriter, pLoopOp);
 }
 
 //===----------------------------------------------------------------------===//
@@ -278,95 +303,16 @@ bool checkMarkerValue(LinalgOpTy linalgOp, StringRef marker = "") {
 
 namespace {
 /// Pass to convert from tiled and fused linalg ops into gpu.func.
-struct ConvertToGPUPass
-    : public PassWrapper<ConvertToGPUPass, OperationPass<ModuleOp>> {
-  void runOnOperation() override;
-};
-
-/// Convert from FuncOp to gpu::GPUFuncOp.
-// TODO(ravishankarm, antiagainst): We dont need to actually create a gpu.func
-// (or the gpu.module that this needs to live in). Eventually when the pipeline
-// works on the dispatch function directly, this should be removed.
-struct GPUFuncConversionPattern : public OpConversionPattern<FuncOp> {
-  using OpConversionPattern<FuncOp>::OpConversionPattern;
-  LogicalResult matchAndRewrite(
-      FuncOp funcOp, ArrayRef<Value> operands,
-      ConversionPatternRewriter &rewriter) const override {
-    if (!isDispatchFuncImpl(funcOp)) return failure();
-    Location loc = funcOp.getLoc();
-
-    rewriter.startRootUpdate(funcOp);
-
-    // Create a gpu.module within which the gpu.func exists.
-    std::string moduleName = Twine(funcOp.getName(), "_gpumodule").str();
-    auto kernelModule = rewriter.create<gpu::GPUModuleOp>(loc, moduleName);
-    OpBuilder::InsertionGuard guard(rewriter);
-    rewriter.setInsertionPointToStart(&kernelModule.body().front());
-
-    // Create a gpu.func and move the body of the funcOp into this.
-    StringRef dispatchFuncImplAttrName = getDispatchFuncAttrName();
-    auto dispatchFuncNameAttr =
-        funcOp.getAttrOfType<StringAttr>(dispatchFuncImplAttrName);
-    auto gpuFuncOp = buildEmptyGPUFuncOp(
-        loc, rewriter, dispatchFuncNameAttr.getValue(), funcOp.getType());
-    TypeConverter::SignatureConversion signatureConversion(
-        funcOp.getNumArguments());
-    for (auto argType : enumerate(funcOp.getType().getInputs()))
-      signatureConversion.addInputs(argType.index(), argType.value());
-    rewriter.applySignatureConversion(&funcOp.getBody(), signatureConversion);
-    rewriter.inlineRegionBefore(funcOp.getBody(), gpuFuncOp.getBody(),
-                                gpuFuncOp.getBody().begin());
-
-    // Move the attributes needed for SPIR-V ABI lowering onto the gpu.func if
-    // they exist.
-    auto targetEnvAttrName = spirv::getTargetEnvAttrName();
-    auto targetEnvAttr = spirv::lookupTargetEnv(funcOp);
-    if (targetEnvAttr)
-      kernelModule.setAttr(targetEnvAttrName,
-                           spirv::lookupTargetEnvOrDefault(funcOp));
-
-    StringRef attrName = spirv::getInterfaceVarABIAttrName();
-    for (unsigned argIndex :
-         llvm::seq<unsigned>(0, gpuFuncOp.getNumArguments())) {
-      if (auto attr = funcOp.getArgAttrOfType<spirv::InterfaceVarABIAttr>(
-              argIndex, attrName)) {
-        gpuFuncOp.setArgAttr(argIndex, attrName, attr);
-        funcOp.removeArgAttr(argIndex,
-                             Identifier::get(attrName, rewriter.getContext()));
-      }
-    }
-
-    StringRef entryAttrName = spirv::getEntryPointABIAttrName();
-    auto attr = funcOp.getAttrOfType<spirv::EntryPointABIAttr>(entryAttrName);
-    if (attr) {
-      gpuFuncOp.setAttr(entryAttrName, attr);
-      funcOp.removeAttr(entryAttrName);
-    }
-    funcOp.removeAttr(getDispatchFuncAttrName());
-    rewriter.finalizeRootUpdate(funcOp);
-    return success();
-  }
-};
-
-/// gpu.func needs to terminate with a gpu.return operation. Convert std.return
-/// to gpu.return.
-// TODO(ravishankarm, antiagainst): Remove this when gpu.func is not created.
-struct ReturnConversion : public OpConversionPattern<ReturnOp> {
-  using OpConversionPattern<ReturnOp>::OpConversionPattern;
-  LogicalResult matchAndRewrite(
-      ReturnOp returnOp, ArrayRef<Value> operands,
-      ConversionPatternRewriter &rewriter) const override {
-    rewriter.replaceOpWithNewOp<gpu::ReturnOp>(returnOp);
-    return success();
-  }
+struct ConvertToGPUPass : public PassWrapper<ConvertToGPUPass, FunctionPass> {
+  void runOnFunction() override;
 };
 
 /// Pattern to map loop.parallel to workgroups.
 struct PartitionPLoopToWorkgroups
-    : public OpConversionPattern<loop::ParallelOp> {
-  using OpConversionPattern<loop::ParallelOp>::OpConversionPattern;
+    : public OpConversionPattern<scf::ParallelOp> {
+  using OpConversionPattern<scf::ParallelOp>::OpConversionPattern;
   LogicalResult matchAndRewrite(
-      loop::ParallelOp pLoopOp, ArrayRef<Value> operands,
+      scf::ParallelOp pLoopOp, ArrayRef<Value> operands,
       ConversionPatternRewriter &rewriter) const override {
     return mapToWorkgroups(rewriter, pLoopOp);
   }
@@ -375,22 +321,21 @@ struct PartitionPLoopToWorkgroups
 /// Map tiled linalg op to workitems by lowering it to loop.parallel and
 /// partitioning it to workitems.
 template <typename LinalgOpTy>
-struct MapLinalgOpToWorkitems : public OpConversionPattern<LinalgOpTy> {
+struct MapLinalgOpToLocalInvocationId : public OpConversionPattern<LinalgOpTy> {
   using OpConversionPattern<LinalgOpTy>::OpConversionPattern;
   LogicalResult matchAndRewrite(
       LinalgOpTy linalgOp, ArrayRef<Value> operands,
       ConversionPatternRewriter &rewriter) const override {
     // Check for marker that specifies that the linalg op is to be partitioned
     // across threads within a workgroup.
-    if (!checkMarkerValue(linalgOp, getWorkItemMarker())) return failure();
+    if (!hasWorkItemMarker(linalgOp)) return failure();
     Optional<linalg::LinalgLoops> loops =
-        linalg::linalgLowerOpToLoops<loop::ParallelOp, LinalgOpTy>(rewriter,
-                                                                   linalgOp);
+        linalg::linalgLowerOpToLoops<scf::ParallelOp, LinalgOpTy>(rewriter,
+                                                                  linalgOp);
     if (!loops) return failure();
     if (!loops.getValue().empty()) {
-      loop::ParallelOp pLoopOp =
-          dyn_cast<loop::ParallelOp>(loops.getValue()[0]);
-      if (!pLoopOp || failed(mapToWorkitems(rewriter, pLoopOp)))
+      scf::ParallelOp pLoopOp = dyn_cast<scf::ParallelOp>(loops.getValue()[0]);
+      if (!pLoopOp || failed(mapToLocalInvocationId(rewriter, pLoopOp)))
         return failure();
     }
     rewriter.eraseOp(linalgOp);
@@ -398,17 +343,28 @@ struct MapLinalgOpToWorkitems : public OpConversionPattern<LinalgOpTy> {
   }
 };
 
-/// Map linalg operation to loops to be executed by a single thread on the GPU.
+/// Map linalg operation to execute on GPU in parallel by mapping the parallel
+/// loops to "GlobalInvocationId".
 template <typename LinalgOpTy>
-struct ExecuteLinalgOpSequentially : public OpConversionPattern<LinalgOpTy> {
+struct MapLinalgOpToGlobalInvocationId
+    : public OpConversionPattern<LinalgOpTy> {
   using OpConversionPattern<LinalgOpTy>::OpConversionPattern;
   LogicalResult matchAndRewrite(
       LinalgOpTy linalgOp, ArrayRef<Value> operands,
       ConversionPatternRewriter &rewriter) const override {
-    // If marker exists, then dont execute the op sequentially.
-    if (checkMarkerValue(linalgOp) ||
-        failed(linalg::linalgOpToLoops<LinalgOpTy>(rewriter, linalgOp)))
-      return failure();
+    // If marker exists and its not no-tile, do nothing.
+    if (hasMarker(linalgOp) && !hasNoTileMarker(linalgOp)) return failure();
+    Optional<linalg::LinalgLoops> loops =
+        linalg::linalgLowerOpToLoops<scf::ParallelOp, LinalgOpTy>(rewriter,
+                                                                  linalgOp);
+    if (!loops) return failure();
+    if (!loops.getValue().empty()) {
+      scf::ParallelOp pLoopOp = dyn_cast<scf::ParallelOp>(loops.getValue()[0]);
+      // If there are parallel loops partition them to threads using global
+      // invocation ID.
+      if (pLoopOp && failed(mapToGlobalInvocationId(rewriter, pLoopOp)))
+        return failure();
+    }
     rewriter.eraseOp(linalgOp);
     return success();
   }
@@ -427,20 +383,9 @@ struct RemoveLinalgRange : public OpConversionPattern<linalg::RangeOp> {
 };
 }  // namespace
 
-void ConvertToGPUPass::runOnOperation() {
-  ModuleOp moduleOp = getOperation();
-  // Find all functions that are dispatch function impls.
-  // TODO(ravishankarm, antiagainst) : Eventually this pass should just
-  // operate on the dispatch function directly.
-  SmallVector<FuncOp, 1> dispatchFnImplFns;
-  for (FuncOp fn : moduleOp.getOps<FuncOp>())
-    if (isDispatchFuncImpl(fn)) dispatchFnImplFns.push_back(fn);
-  if (!llvm::hasSingleElement(dispatchFnImplFns)) {
-    moduleOp.emitError("unhandled multiple dispatch function impl fns");
-    return signalPassFailure();
-  }
+void ConvertToGPUPass::runOnFunction() {
+  FuncOp funcOp = getFunction();
 
-  FuncOp funcOp = dispatchFnImplFns[0];
   Region &body = funcOp.getBody();
   if (!llvm::hasSingleElement(body)) {
     funcOp.emitError("unhandled dispatch function with multiple blocks");
@@ -449,41 +394,47 @@ void ConvertToGPUPass::runOnOperation() {
 
   MLIRContext *context = &getContext();
   ConversionTarget target(*context);
-  target.addLegalDialect<StandardOpsDialect, gpu::GPUDialect,
-                         loop::LoopOpsDialect>();
-  target.addDynamicallyLegalOp<FuncOp>(
-      [](FuncOp fn) -> bool { return !isDispatchFuncImpl(fn); });
-  target.addIllegalOp<ReturnOp>();
-  target.addIllegalOp<loop::ParallelOp>();
+  // Ater this pass Linalg and loop.parallel ops should be gone.
+  target.addIllegalOp<scf::ParallelOp>();
   target.addIllegalDialect<linalg::LinalgDialect>();
+  // Reshape ops are treated legal since they just change the way the underlying
+  // buffer is viewed. These are legalized downstream. They become no ops when
+  // lowering to SPIR-V since the SPIR-V code uses linearized arrays.
+  target.addLegalOp<linalg::ReshapeOp>();
+  // Let the rest fall through.
+  target.markUnknownOpDynamicallyLegal([](Operation *) { return true; });
 
   OwningRewritePatternList patterns;
-  patterns
-      .insert<GPUFuncConversionPattern,
-#define ADD_ALL_LINALG_PATTERNS(OP_NAME) \
-  ExecuteLinalgOpSequentially<OP_NAME>, MapLinalgOpToWorkitems<OP_NAME>
+  patterns.insert<
 
-              ADD_ALL_LINALG_PATTERNS(linalg::ConvOp),
-              ADD_ALL_LINALG_PATTERNS(linalg::FillOp),
-              ADD_ALL_LINALG_PATTERNS(linalg::GenericOp),
-              ADD_ALL_LINALG_PATTERNS(linalg::IndexedGenericOp),
-              ADD_ALL_LINALG_PATTERNS(linalg::MatmulOp),
+#define ADD_ALL_LINALG_PATTERNS(OP_NAME)    \
+  MapLinalgOpToGlobalInvocationId<OP_NAME>, \
+      MapLinalgOpToLocalInvocationId<OP_NAME>
+
+      ADD_ALL_LINALG_PATTERNS(linalg::ConvOp),
+      ADD_ALL_LINALG_PATTERNS(linalg::CopyOp),
+      ADD_ALL_LINALG_PATTERNS(linalg::FillOp),
+      ADD_ALL_LINALG_PATTERNS(linalg::GenericOp),
+      ADD_ALL_LINALG_PATTERNS(linalg::IndexedGenericOp),
+      ADD_ALL_LINALG_PATTERNS(linalg::MatmulOp),
+      ADD_ALL_LINALG_PATTERNS(linalg::PoolingMaxOp),
+      ADD_ALL_LINALG_PATTERNS(linalg::PoolingMinOp),
+      ADD_ALL_LINALG_PATTERNS(linalg::PoolingSumOp),
 
 #undef ADD_ALL_LINALG_PATTERNS
-              PartitionPLoopToWorkgroups, RemoveLinalgRange, ReturnConversion>(
-          context);
 
-  populateAffineToStdConversionPatterns(patterns, context);
-  if (failed(applyPartialConversion(funcOp, target, patterns)))
+      PartitionPLoopToWorkgroups, RemoveLinalgRange>(context);
+
+  if (failed(applyFullConversion(funcOp, target, patterns)))
     return signalPassFailure();
 }
 
-std::unique_ptr<OperationPass<ModuleOp>> createConvertToGPUPass() {
+std::unique_ptr<OperationPass<FuncOp>> createConvertToGPUPass() {
   return std::make_unique<ConvertToGPUPass>();
 }
 
 static PassRegistration<ConvertToGPUPass> pass(
-    "iree-convert-to-gpu", "Convert tiled linalg operation to GPU function",
+    "iree-codegen-convert-to-gpu", "Map tiled linalg and loop ops to GPU",
     [] { return std::make_unique<ConvertToGPUPass>(); });
 
 }  // namespace iree_compiler

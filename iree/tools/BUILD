@@ -27,12 +27,6 @@ exports_files([
     "sanitizer_suppressions.txt",
 ])
 
-IREE_COMPILER_DIALECT_MODULES = [
-    "//iree/compiler/Dialect/Modules/Check/IR:CheckDialect",
-    "//iree/compiler/Dialect/Modules/Strings/IR:Dialect",
-    "//iree/compiler/Dialect/Modules/TensorList/IR:TensorListDialect",
-]
-
 cc_binary(
     name = "iree-benchmark-module",
     testonly = True,
@@ -73,13 +67,17 @@ cc_library(
         "init_passes.h",
     ],
     deps = [
+        "//iree/compiler/Dialect/Flow/Analysis",
         "//iree/compiler/Dialect/Flow/IR",
         "//iree/compiler/Dialect/Flow/Transforms",
         "//iree/compiler/Dialect/HAL/IR:HALDialect",
+        "//iree/compiler/Dialect/HAL/Transforms",
         "//iree/compiler/Dialect/IREE/IR",
         "//iree/compiler/Dialect/IREE/Transforms",
+        "//iree/compiler/Dialect/Shape/Conversion",
         "//iree/compiler/Dialect/Shape/IR",
         "//iree/compiler/Dialect/Shape/Transforms",
+        "//iree/compiler/Dialect/VM/Analysis",
         "//iree/compiler/Dialect/VM/IR",
         "//iree/compiler/Dialect/VM/Transforms",
         "//iree/compiler/Dialect/VMLA/IR:VMLADialect",
@@ -96,17 +94,28 @@ cc_library(
         "@llvm-project//mlir:LinalgToLLVM",
         "@llvm-project//mlir:LinalgToSPIRV",
         "@llvm-project//mlir:LinalgTransforms",
-        "@llvm-project//mlir:LoopOps",
-        "@llvm-project//mlir:LoopOpsTransforms",
         "@llvm-project//mlir:LoopsToGPUPass",
         "@llvm-project//mlir:QuantOps",
+        "@llvm-project//mlir:SCFDialect",
+        "@llvm-project//mlir:SCFTransforms",
         "@llvm-project//mlir:SDBM",
         "@llvm-project//mlir:SPIRVDialect",
         "@llvm-project//mlir:SPIRVLowering",
+        "@llvm-project//mlir:Shape",
         "@llvm-project//mlir:StandardOps",
         "@llvm-project//mlir:StandardToSPIRVConversions",
         "@llvm-project//mlir:Transforms",
         "@llvm-project//mlir:VectorOps",
+    ],
+)
+
+cc_library(
+    name = "init_compiler_modules",
+    hdrs = ["init_compiler_modules.h"],
+    deps = [
+        "//iree/compiler/Dialect/Modules/Check/IR:CheckDialect",
+        "//iree/compiler/Dialect/Modules/Strings/IR:Dialect",
+        "//iree/compiler/Dialect/Modules/TensorList/IR:TensorListDialect",
     ],
 )
 
@@ -131,19 +140,34 @@ cc_library(
 )
 
 cc_library(
+    name = "init_xla_dialects",
+    hdrs = [
+        "init_xla_dialects.h",
+    ],
+    deps = [
+        "@llvm-project//mlir:IR",
+        "@org_tensorflow//tensorflow/compiler/mlir/xla:hlo",
+        "@org_tensorflow//tensorflow/compiler/mlir/xla:lhlo",
+    ],
+)
+
+cc_library(
     name = "iree_opt_main",
     srcs = ["opt_main.cc"],
     deps = [
+        ":init_compiler_modules",
         ":init_passes_and_dialects",
         ":init_targets",
-        "//iree/compiler/Dialect/IREE/IR",
-        "//iree/compiler/Dialect/IREE/Transforms",
+        ":init_xla_dialects",
         "//iree/compiler/Dialect/Flow/Analysis",
         "//iree/compiler/Dialect/Flow/IR",
         "//iree/compiler/Dialect/Flow/Transforms",
         "//iree/compiler/Dialect/HAL/Conversion/FlowToHAL",
         "//iree/compiler/Dialect/HAL/Conversion/HALToVM",
         "//iree/compiler/Dialect/HAL/Transforms",
+        "//iree/compiler/Dialect/IREE/IR",
+        "//iree/compiler/Dialect/IREE/Transforms",
+        "//iree/compiler/Dialect/Shape/Conversion",
         "//iree/compiler/Dialect/Shape/IR",
         "//iree/compiler/Dialect/Shape/Transforms",
         "//iree/compiler/Dialect/VM/Analysis",
@@ -156,18 +180,15 @@ cc_library(
         "//iree/compiler/Dialect/Vulkan/IR",
         "//iree/compiler/Translation:IREEVM",
         "//iree/compiler/Translation/CodegenPasses",
-        "//iree/compiler/Translation/SPIRV/XLAToSPIRV",
-        "//iree/compiler/Translation/SPIRV/LinalgToSPIRV",
+        "//iree/compiler/Translation/SPIRV:init_translations",
         "@llvm-project//llvm:support",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:MlirOptLib",
         "@llvm-project//mlir:Pass",
         "@llvm-project//mlir:Support",
         "@org_tensorflow//tensorflow/compiler/mlir/xla:hlo",
-        "@org_tensorflow//tensorflow/compiler/mlir/xla:xla_dialect_registration",
         "@org_tensorflow//tensorflow/compiler/mlir/xla:xla_legalize_control_flow",
-        "@org_tensorflow//tensorflow/compiler/mlir/xla:xla_test_passes",
-    ] + IREE_COMPILER_DIALECT_MODULES,
+    ],
 )
 
 cc_binary(
@@ -183,6 +204,7 @@ cc_binary(
     srcs = ["run_mlir_main.cc"],
     tags = ["hostonly"],
     deps = [
+        ":init_compiler_modules",
         ":init_passes_and_dialects",
         ":init_targets",
         ":vm_util",
@@ -195,6 +217,7 @@ cc_binary(
         "//iree/compiler/Dialect/Flow/Transforms",
         "//iree/compiler/Dialect/HAL/Transforms",
         "//iree/compiler/Dialect/IREE/Transforms",
+        "//iree/compiler/Dialect/VM/Target:init_targets",
         "//iree/compiler/Dialect/VM/Target/Bytecode",
         "//iree/compiler/Dialect/VM/Transforms",
         "//iree/hal:api",
@@ -204,14 +227,14 @@ cc_binary(
         "//iree/vm:value",
         "@llvm-project//llvm:support",
         "@llvm-project//mlir:IR",
-        "@llvm-project//mlir:LoopOpsTransforms",
+        "@llvm-project//mlir:SCFTransforms",
         "@llvm-project//mlir:Parser",
         "@llvm-project//mlir:Pass",
         "@llvm-project//mlir:Support",
         "//iree/base:init",
         "//iree/base:status",
         "//iree/compiler/Translation:IREEVM",
-    ] + IREE_COMPILER_DIALECT_MODULES + PLATFORM_VULKAN_DEPS + IREE_DRIVER_MODULES,
+    ] + PLATFORM_VULKAN_DEPS + IREE_DRIVER_MODULES,
 )
 
 cc_binary(
@@ -251,21 +274,22 @@ cc_library(
     name = "iree_translate_main",
     srcs = ["translate_main.cc"],
     deps = [
+        ":init_compiler_modules",
         ":init_passes_and_dialects",
         ":init_targets",
         ":init_translations",
+        ":init_xla_dialects",
+        "//iree/compiler/Dialect/VM/Target:init_targets",
         "//iree/compiler/Dialect/VM/Target/Bytecode",
         "//iree/compiler/Translation:IREEVM",
-        "//iree/compiler/Translation/SPIRV/XLAToSPIRV",
+        "//iree/compiler/Translation/SPIRV:init_translations",
         "@llvm-project//llvm:support",
         "@llvm-project//mlir:IR",
-        "@llvm-project//mlir:LoopOpsTransforms",
         "@llvm-project//mlir:Pass",
+        "@llvm-project//mlir:SCFTransforms",
         "@llvm-project//mlir:Support",
         "@llvm-project//mlir:Translation",
-        "@org_tensorflow//tensorflow/compiler/mlir/xla:xla_dialect_registration",
-    ] + IREE_COMPILER_DIALECT_MODULES,
-    alwayslink = 1,
+    ],
 )
 
 cc_binary(

@@ -20,14 +20,13 @@ iree_cc_library(
   HDRS
     "Passes.h"
   SRCS
+    "InlineDeviceSwitches.cpp"
     "LinkExecutables.cpp"
     "MaterializeInterfaces.cpp"
     "MaterializeResourceCaches.cpp"
     "MemoizeDeviceQueries.cpp"
-    "OutlineDeviceSwitches.cpp"
     "Passes.cpp"
     "PublicAbiGeneration.cpp"
-    "RewriteLegacyIO.cpp"
     "SerializeExecutables.cpp"
     "TranslateExecutables.cpp"
   DEPS
@@ -47,6 +46,5 @@ iree_cc_library(
     iree::compiler::Dialect::Shape::Transforms
     iree::compiler::Utils
     tensorflow::mlir_xla
-  ALWAYSLINK
   PUBLIC
 )

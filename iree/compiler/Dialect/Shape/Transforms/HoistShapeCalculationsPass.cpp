@@ -18,8 +18,8 @@
 #include "iree/compiler/Dialect/Shape/IR/ShapeDialect.h"
 #include "iree/compiler/Dialect/Shape/IR/ShapeOps.h"
 #include "iree/compiler/Dialect/Shape/IR/ShapeTypes.h"
-#include "mlir/Analysis/Dominance.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
+#include "mlir/IR/Dominance.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassRegistry.h"
 
@@ -100,17 +100,16 @@ void hoistOps(DenseSet<Operation *> opsToHoistSet, Block &block) {
   });
 
   for (Operation *op : opsToHoist) {
-    Operation *insertAfter = nullptr;
+    Operation *moveAfter = nullptr;
     for (Value operand : op->getOperands()) {
       if (Operation *definingOp = getDefiningOpInBlock(operand, block)) {
-        if (insertAfter == nullptr ||
-            insertAfter->isBeforeInBlock(definingOp)) {
-          insertAfter = definingOp;
+        if (moveAfter == nullptr || moveAfter->isBeforeInBlock(definingOp)) {
+          moveAfter = definingOp;
         }
       }
     }
-    if (insertAfter != nullptr) {
-      op->moveBefore(&*std::next(insertAfter->getIterator()));
+    if (moveAfter != nullptr) {
+      op->moveAfter(moveAfter);
     } else {
       op->moveBefore(&block, block.begin());
     }

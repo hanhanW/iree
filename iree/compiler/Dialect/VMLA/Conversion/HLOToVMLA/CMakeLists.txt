@@ -21,7 +21,6 @@ iree_cc_library(
     "ConvertHLOToVMLA.h"
   SRCS
     "ConvertConvOps.cpp"
-    "ConvertDotOps.cpp"
     "ConvertHLOToVMLA.cpp"
     "ConvertReductionOps.cpp"
   DEPS

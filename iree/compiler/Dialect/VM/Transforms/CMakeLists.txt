@@ -35,6 +35,7 @@ iree_cc_library(
     iree::compiler::Dialect::IREE::Conversion::PreserveCompilerHints
     iree::compiler::Dialect::Shape::IR
     iree::compiler::Dialect::VM::Conversion
+    iree::compiler::Dialect::VM::Conversion::IREEToVM
     iree::compiler::Dialect::VM::Conversion::StandardToVM
     iree::compiler::Dialect::VM::IR
   PUBLIC

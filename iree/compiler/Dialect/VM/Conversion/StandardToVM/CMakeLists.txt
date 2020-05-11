@@ -21,7 +21,7 @@ iree_cc_library(
     "ConvertStandardToVM.h"
   SRCS
     "ConvertStandardToVM.cpp"
-    "ConvertStandardToVMPass.cpp"
+    "ConvertStandardToVMTest.cpp"
   DEPS
     MLIRIR
     MLIRPass
@@ -31,6 +31,5 @@ iree_cc_library(
     iree::compiler::Dialect::IREE::IR
     iree::compiler::Dialect::VM::Conversion
     iree::compiler::Dialect::VM::IR
-  ALWAYSLINK
   PUBLIC
 )

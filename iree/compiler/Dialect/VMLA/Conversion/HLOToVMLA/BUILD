@@ -21,7 +21,6 @@ cc_library(
     name = "HLOToVMLA",
     srcs = [
         "ConvertConvOps.cpp",
-        "ConvertDotOps.cpp",
         "ConvertHLOToVMLA.cpp",
         "ConvertReductionOps.cpp",
     ],
@@ -40,5 +39,6 @@ cc_library(
         "@llvm-project//mlir:StandardOps",
         "@llvm-project//mlir:Transforms",
         "@org_tensorflow//tensorflow/compiler/mlir/xla:hlo",
+        "@org_tensorflow//tensorflow/compiler/mlir/xla:xla_legalize_to_standard",
     ],
 )

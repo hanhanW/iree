@@ -18,16 +18,13 @@ iree_cc_library(
   NAME
     CodegenUtils
   HDRS
-    "CodegenUtils.h"
+    "MarkerUtils.h"
   SRCS
-    "CodegenUtils.cpp"
+    "MarkerUtils.cpp"
   DEPS
+    LLVMSupport
     MLIRIR
-    MLIRSPIRV
-    MLIRStandardOps
+    MLIRLinalgTransforms
     MLIRSupport
-    iree::compiler::Dialect::HAL::IR
-    iree::compiler::Dialect::IREE::IR
-  ALWAYSLINK
   PUBLIC
 )

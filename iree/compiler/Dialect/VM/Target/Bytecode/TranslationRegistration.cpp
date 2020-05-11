@@ -23,12 +23,14 @@ namespace iree_compiler {
 namespace IREE {
 namespace VM {
 
-static TranslateFromMLIRRegistration toBytecodeModule(
-    "iree-vm-ir-to-bytecode-module",
-    [](mlir::ModuleOp moduleOp, llvm::raw_ostream &output) {
-      return translateModuleToBytecode(
-          moduleOp, getBytecodeTargetOptionsFromFlags(), output);
-    });
+void registerToVMBytecodeTranslation() {
+  TranslateFromMLIRRegistration toBytecodeModule(
+      "iree-vm-ir-to-bytecode-module",
+      [](mlir::ModuleOp moduleOp, llvm::raw_ostream &output) {
+        return translateModuleToBytecode(
+            moduleOp, getBytecodeTargetOptionsFromFlags(), output);
+      });
+}
 
 }  // namespace VM
 }  // namespace IREE

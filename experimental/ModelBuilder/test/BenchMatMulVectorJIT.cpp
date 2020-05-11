@@ -24,7 +24,7 @@ static AffineMap makeMap(ModelBuilder &mb, int i, int j) {
   SmallVector<AffineExpr, 4> results;
   results.push_back(getAffineDimExpr(i, mb.getContext()));
   results.push_back(getAffineDimExpr(j, mb.getContext()));
-  return AffineMap::get(3, 0, results);
+  return AffineMap::get(3, 0, results, mb.getContext());
 }
 
 // Helper method to build a NxN matrix-matrix-transpose multiplication function
@@ -38,7 +38,8 @@ void buildMatMat(ModelBuilder &mb, StringLiteral fn) {
   auto typeB = typeA;
   auto typeC = typeA;
 
-  auto f = mb.makeFunction(fn, {}, {typeA, typeB, typeC});
+  auto f = mb.makeFunction(fn, {}, {typeA, typeB, typeC},
+                           MLIRFuncOpConfig().setEmitCInterface(true));
   OpBuilder b(&f.getBody());
   ScopedContext scope(b, f.getLoc());
 
@@ -60,11 +61,11 @@ void buildMatMat(ModelBuilder &mb, StringLiteral fn) {
 
   // Loop ITERS times over the kernel to reduce the JIT's overhead.
   StdIndexedValue A(f.getArgument(0)), B(f.getArgument(1)), C(f.getArgument(2));
-  ValueHandle i(mb.getIndexType());
+  Value i;
   LoopNestBuilder(&i, std_constant_index(0), std_constant_index(ITERS),
                   std_constant_index(1))([&] {
     // Compute C += A x B^T with row-wise dot-products.
-    C() = (vector_contract(*A(), *B(), *C(), mb.getAffineMapArrayAttr(accesses),
+    C() = (vector_contract(A(), B(), C(), mb.getAffineMapArrayAttr(accesses),
                            mb.getArrayAttr(iterator_types)));
   });
   std_ret();
