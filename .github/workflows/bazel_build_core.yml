@@ -18,33 +18,22 @@ name: Bazel Build - Core
 
 on:
   push:
-    branches: [master]
+    branches:
+      - 'master'
+      # Run on pushes to branches with a special name indicating they'd like
+      # to run these actions.
+      - 'test-ga-bazel*'
 
 jobs:
   linux:
     runs-on: ubuntu-18.04
-    container: l.gcr.io/google/bazel:2.1.0
-    env:
-      CXX: clang++
-      CC: clang
-      PYTHON_BIN: /usr/bin/python3
+    container: gcr.io/iree-oss/bazel@sha256:14e4e26b5acb14aac5d0b3017fe79a282985d3d365e0b0b4e7e9ab8ffa0f60bb
     steps:
-      - name: Installing IREE dependencies
+      - name: Printing environment
         run: |
-          apt-get update
-          apt-get install -y clang libsdl2-dev
-      - name: Installing actions/checkout@v2 dependencies
-        run: |
-          # Update git to version >= 2.18 for actions/checkout@v2.
-          add-apt-repository ppa:git-core/ppa
-          apt-get update
-          apt-get install -y git
-      - name: Installing tensorflow dependencies
-        run: |
-          # Install python2 numpy. Temporary fix for issue #1737.
-          apt-get install -y python-pip
-          python -m pip install --upgrade pip
-          python -m pip install numpy
+          "$CXX" --version
+          "$CC" --version
+          "$PYTHON_BIN" --version
       - name: Checking out repository
         uses: actions/checkout@v2
       - name: Initializing submodules

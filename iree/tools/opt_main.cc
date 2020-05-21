@@ -17,8 +17,9 @@
 // Based on mlir-opt but without registering passes and dialects we don't care
 // about.
 
-#include "iree/compiler/Translation/CodegenPasses/Passes.h"
-#include "iree/compiler/Translation/SPIRV/init_translations.h"
+#include "iree/compiler/Conversion/HLOToLinalg/Passes.h"
+#include "iree/compiler/Conversion/init_conversions.h"
+#include "iree/compiler/Dialect/HAL/Conversion/Passes.h"
 #include "iree/tools/init_compiler_modules.h"
 #include "iree/tools/init_dialects.h"
 #include "iree/tools/init_passes.h"
@@ -64,6 +65,10 @@ static llvm::cl::opt<bool> allowUnregisteredDialects(
     llvm::cl::desc("Allow operation with no registered dialects"),
     llvm::cl::init(true));
 
+static llvm::cl::opt<bool> showDialects(
+    "show-dialects", llvm::cl::desc("Print the list of registered dialects"),
+    llvm::cl::init(false));
+
 int main(int argc, char **argv) {
   mlir::registerMlirDialects();
   mlir::registerMlirPasses();
@@ -71,9 +76,11 @@ int main(int argc, char **argv) {
   mlir::iree_compiler::registerIreeDialects();
   mlir::iree_compiler::registerIreeCompilerModuleDialects();
   mlir::iree_compiler::registerAllIreePasses();
+  mlir::iree_compiler::registerHALConversionPasses();
   mlir::iree_compiler::registerHALTargetBackends();
-  mlir::iree_compiler::registerSPRIVTranslation();
-  mlir::iree_compiler::registerCodegenPasses();
+  mlir::iree_compiler::registerLinalgToSPIRVPasses();
+  mlir::iree_compiler::registerHLOToLinalgPasses();
+  mlir::iree_compiler::registerLinalgToLLVMPasses();
   llvm::InitLLVM y(argc, argv);
 
   // Register MLIRContext command-line options like
@@ -90,6 +97,15 @@ int main(int argc, char **argv) {
   // Parse pass names in main to ensure static initialization completed.
   llvm::cl::ParseCommandLineOptions(argc, argv,
                                     "IREE modular optimizer driver\n");
+
+  if (showDialects) {
+    llvm::outs() << "Registered Dialects:\n";
+    mlir::MLIRContext context;
+    for (mlir::Dialect *dialect : context.getRegisteredDialects()) {
+      llvm::outs() << dialect->getNamespace() << "\n";
+    }
+    return 0;
+  }
 
   // Set up the input file.
   std::string errorMessage;

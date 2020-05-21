@@ -27,8 +27,8 @@ http_archive(
     sha256 = "cf3b76a90c86c0554c5b10f4b160f05af71d252026b71362c4674e2fb9936cf9",
     strip_prefix = "rules_cc-01d4a48911d5e7591ecb1c06d3b8af47fe872371",
     urls = [
-	"https://storage.googleapis.com/mirror.tensorflow.org/github.com/bazelbuild/rules_cc/archive/01d4a48911d5e7591ecb1c06d3b8af47fe872371.zip",
-	"https://github.com/bazelbuild/rules_cc/archive/01d4a48911d5e7591ecb1c06d3b8af47fe872371.zip",
+      "https://storage.googleapis.com/mirror.tensorflow.org/github.com/bazelbuild/rules_cc/archive/01d4a48911d5e7591ecb1c06d3b8af47fe872371.zip",
+      "https://github.com/bazelbuild/rules_cc/archive/01d4a48911d5e7591ecb1c06d3b8af47fe872371.zip",
     ],
 )
 
@@ -57,7 +57,14 @@ http_archive(
 )
 
 load("@bazel_toolchains//rules:rbe_repo.bzl", "rbe_autoconfig")
-rbe_autoconfig(name = "rbe_default")
+
+rbe_autoconfig(
+    name = "rbe_default",
+    base_container_digest = 'sha256:ac36d37616b044ee77813fc7cd36607a6dc43c65357f3e2ca39f3ad723e426f6',
+    digest = "sha256:61fd698572dc8b5fc9db11cb4ba4f138a915517b80617259bcaef8e1e4ffd3fb",
+    registry = "gcr.io",
+    repository = "iree-oss/rbe-toolchain"
+)
 
 ###############################################################################
 
@@ -159,12 +166,6 @@ maybe(local_repository,
 maybe(local_repository,
     name = "com_github_google_flatbuffers",
     path = "third_party/flatbuffers",
-)
-
-maybe(new_local_repository,
-    name = "com_google_tracing_framework_cpp",
-    path = "third_party/google_tracing_framework/bindings/cpp",
-    build_file = "build_tools/third_party/google_tracing_framework_cpp/BUILD.overlay",
 )
 
 # TODO(scotttodd): TensorFlow is squatting on the vulkan_headers repo name, so

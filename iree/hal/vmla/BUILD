@@ -28,7 +28,6 @@ cc_library(
         "op_kernels_ruy.h",
     ],
     deps = [
-        "//iree/base:shape",
         "//iree/base:status",
         "//iree/base:tracing",
         "@com_google_absl//absl/algorithm",
@@ -50,6 +49,7 @@ cc_test(
         "//iree/base:memory",
         "//iree/base:status_matchers",
         "//iree/testing:gtest_main",
+        "@com_google_absl//absl/container:inlined_vector",
     ],
 )
 
@@ -84,6 +84,7 @@ cc_library(
         "//iree/hal/host:host_buffer",
         "//iree/hal/host:host_local_command_processor",
         "//iree/vm:invocation",
+        "//iree/vm:stack",
         "//iree/vm:variant_list",
     ],
 )
@@ -101,12 +102,12 @@ cc_library(
         "//iree/hal:command_buffer_validation",
         "//iree/hal:command_queue",
         "//iree/hal:device",
-        "//iree/hal:fence",
         "//iree/hal/host:async_command_queue",
         "//iree/hal/host:host_descriptor_set",
         "//iree/hal/host:host_event",
         "//iree/hal/host:host_executable_layout",
         "//iree/hal/host:host_local_allocator",
+        "//iree/hal/host:host_semaphore",
         "//iree/hal/host:host_submission_queue",
         "//iree/hal/host:inproc_command_buffer",
         "//iree/vm:instance",
@@ -162,7 +163,6 @@ cc_library(
         "//iree/vm:bytecode_module",
         "//iree/vm:context",
         "//iree/vm:instance",
-        "//iree/vm:invocation",
         "//iree/vm:module",
         "//iree/vm:variant_list",
         "@com_google_absl//absl/container:inlined_vector",

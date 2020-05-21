@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+load("//iree:build_defs.oss.bzl", iree_cc_binary = "cc_binary")
 load("//build_tools/embed_data:build_defs.bzl", "cc_embed_data")
 load("//build_tools/bazel:tblgen.bzl", "gentbl")
 
@@ -87,14 +88,17 @@ cc_library(
     ],
 )
 
-cc_binary(
+iree_cc_binary(
     name = "custom-opt",
     srcs = ["custom_opt.cc"],
     deps = [
         ":init_dialect",
+        "//iree/compiler/Conversion:init_conversions",
+        "//iree/compiler/Conversion/HLOToLinalg",
         "//iree/compiler/Dialect/Flow/Analysis",
         "//iree/compiler/Dialect/Flow/IR",
         "//iree/compiler/Dialect/Flow/Transforms",
+        "//iree/compiler/Dialect/HAL/Conversion:Passes",
         "//iree/compiler/Dialect/HAL/Conversion/FlowToHAL",
         "//iree/compiler/Dialect/HAL/Conversion/HALToVM",
         "//iree/compiler/Dialect/HAL/Transforms",
@@ -112,8 +116,6 @@ cc_binary(
         "//iree/compiler/Dialect/VMLA/Transforms",
         "//iree/compiler/Dialect/Vulkan/IR",
         "//iree/compiler/Translation:IREEVM",
-        "//iree/compiler/Translation/CodegenPasses",
-        "//iree/compiler/Translation/SPIRV:init_translations",
         "//iree/tools:init_compiler_modules",
         "//iree/tools:init_passes_and_dialects",
         "//iree/tools:init_targets",
@@ -128,15 +130,15 @@ cc_binary(
     ],
 )
 
-cc_binary(
+iree_cc_binary(
     name = "custom-translate",
     srcs = ["custom_translate.cc"],
     deps = [
         ":init_dialect",
+        "//iree/compiler/Conversion:init_conversions",
         "//iree/compiler/Dialect/VM/Target:init_targets",
         "//iree/compiler/Dialect/VM/Target/Bytecode",
         "//iree/compiler/Translation:IREEVM",
-        "//iree/compiler/Translation/SPIRV:init_translations",
         "//iree/tools:init_compiler_modules",
         "//iree/tools:init_passes_and_dialects",
         "//iree/tools:init_targets",

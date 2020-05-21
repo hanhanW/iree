@@ -14,7 +14,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Build the project with bazel using Kokoro.
+# For use within a IREE bazel docker image on a Kokoro VM.
+# Log some information about the environment, initialize the submodules and then
+# run the bazel tests.
 
 set -e
 set -x
@@ -24,14 +26,12 @@ export PS4='[$(date -u "+%T %Z")] '
 
 # Check these exist and print the versions for later debugging
 bazel --version
+"$CXX" --version
+"$CC" --version
+"$PYTHON_BIN" -V
+# TODO( #1875 ): Make PYTHON_BIN also control the runtime version
 python3 -V
 
-export CXX=clang++-6.0
-export CC=clang-6.0
-export PYTHON_BIN="$(which python3)"
-
-# Kokoro checks out the repository here.
-cd ${KOKORO_ARTIFACTS_DIR?}/github/iree
 echo "Initializing submodules"
 ./scripts/git/submodule_versions.py init
 

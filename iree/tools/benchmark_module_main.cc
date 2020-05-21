@@ -19,6 +19,7 @@
 #include "iree/base/file_io.h"
 #include "iree/base/source_location.h"
 #include "iree/base/status.h"
+#include "iree/base/tracing.h"
 #include "iree/modules/hal/hal_module.h"
 #include "iree/tools/vm_util.h"
 #include "iree/vm/bytecode_module.h"
@@ -52,6 +53,7 @@ namespace iree {
 namespace {
 
 StatusOr<std::string> GetModuleContentsFromFlags() {
+  IREE_TRACE_SCOPE0("GetModuleContentsFromFlags");
   auto input_file = absl::GetFlag(FLAGS_input_file);
   if (input_file.empty()) {
     return InvalidArgumentErrorBuilder(IREE_LOC)
@@ -61,6 +63,8 @@ StatusOr<std::string> GetModuleContentsFromFlags() {
 }
 
 Status Run(::benchmark::State& state) {
+  IREE_TRACE_SCOPE0("iree-benchmark-module");
+
   RETURN_IF_ERROR(FromApiStatus(iree_hal_module_register_types(), IREE_LOC))
       << "registering HAL types";
   iree_vm_instance_t* instance = nullptr;
@@ -119,7 +123,7 @@ Status Run(::benchmark::State& state) {
       FromApiStatus(iree_vm_invoke(context, function, /*policy=*/nullptr,
                                    inputs, outputs, IREE_ALLOCATOR_SYSTEM),
                     IREE_LOC));
-  RETURN_IF_ERROR(FromApiStatus(iree_vm_variant_list_free(outputs), IREE_LOC));
+  iree_vm_variant_list_free(outputs);
 
   for (auto _ : state) {
     // No status conversions and conditional returns in the benchmarked inner
@@ -128,19 +132,15 @@ Status Run(::benchmark::State& state) {
                                              IREE_ALLOCATOR_SYSTEM, &outputs));
     IREE_CHECK_OK(iree_vm_invoke(context, function, /*policy=*/nullptr, inputs,
                                  outputs, IREE_ALLOCATOR_SYSTEM));
-    IREE_CHECK_OK(iree_vm_variant_list_free(outputs));
+    iree_vm_variant_list_free(outputs);
   }
 
-  // TODO(gcmn): Some nice wrappers to make this pattern shorter with generated
-  // error messages.
-  // Deallocate:
-  RETURN_IF_ERROR(FromApiStatus(iree_vm_variant_list_free(inputs), IREE_LOC));
-  RETURN_IF_ERROR(FromApiStatus(iree_vm_module_release(hal_module), IREE_LOC));
-  RETURN_IF_ERROR(
-      FromApiStatus(iree_vm_module_release(input_module), IREE_LOC));
-  RETURN_IF_ERROR(FromApiStatus(iree_hal_device_release(device), IREE_LOC));
-  RETURN_IF_ERROR(FromApiStatus(iree_vm_context_release(context), IREE_LOC));
-  RETURN_IF_ERROR(FromApiStatus(iree_vm_instance_release(instance), IREE_LOC));
+  iree_vm_variant_list_free(inputs);
+  iree_vm_module_release(hal_module);
+  iree_vm_module_release(input_module);
+  iree_hal_device_release(device);
+  iree_vm_context_release(context);
+  iree_vm_instance_release(instance);
   return OkStatus();
 }
 

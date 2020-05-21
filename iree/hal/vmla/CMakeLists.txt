@@ -29,7 +29,6 @@ iree_cc_library(
     absl::inlined_vector
     absl::memory
     absl::span
-    iree::base::shape
     iree::base::status
     iree::base::tracing
     ruy
@@ -43,6 +42,7 @@ iree_cc_test(
     "op_kernels_test.cc"
   DEPS
     ::op_kernels
+    absl::inlined_vector
     iree::base::memory
     iree::base::status_matchers
     iree::testing::gtest_main
@@ -85,6 +85,7 @@ iree_cc_library(
     iree::hal::host::host_buffer
     iree::hal::host::host_local_command_processor
     iree::vm::invocation
+    iree::vm::stack
     iree::vm::variant_list
   PUBLIC
 )
@@ -109,12 +110,12 @@ iree_cc_library(
     iree::hal::command_buffer_validation
     iree::hal::command_queue
     iree::hal::device
-    iree::hal::fence
     iree::hal::host::async_command_queue
     iree::hal::host::host_descriptor_set
     iree::hal::host::host_event
     iree::hal::host::host_executable_layout
     iree::hal::host::host_local_allocator
+    iree::hal::host::host_semaphore
     iree::hal::host::host_submission_queue
     iree::hal::host::inproc_command_buffer
     iree::vm::instance
@@ -176,7 +177,6 @@ iree_cc_library(
     iree::vm::bytecode_module
     iree::vm::context
     iree::vm::instance
-    iree::vm::invocation
     iree::vm::module
     iree::vm::variant_list
   PUBLIC

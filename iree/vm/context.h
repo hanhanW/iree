@@ -56,11 +56,11 @@ IREE_API_EXPORT iree_status_t IREE_API_CALL iree_vm_context_create_with_modules(
     iree_vm_context_t** out_context);
 
 // Retains the given |context| for the caller.
-IREE_API_EXPORT iree_status_t IREE_API_CALL
+IREE_API_EXPORT void IREE_API_CALL
 iree_vm_context_retain(iree_vm_context_t* context);
 
 // Releases the given |context| from the caller.
-IREE_API_EXPORT iree_status_t IREE_API_CALL
+IREE_API_EXPORT void IREE_API_CALL
 iree_vm_context_release(iree_vm_context_t* context);
 
 // Returns a process-unique ID for the |context|.
@@ -71,6 +71,14 @@ iree_vm_context_id(const iree_vm_context_t* context);
 // state.
 IREE_API_EXPORT iree_vm_state_resolver_t IREE_API_CALL
 iree_vm_context_state_resolver(const iree_vm_context_t* context);
+
+// Sets |out_module_state| to the context-specific state for the given |module|.
+// The state is owned by the context and will only be live for as long as the
+// context is.
+IREE_API_EXPORT iree_status_t IREE_API_CALL
+iree_vm_context_resolve_module_state(const iree_vm_context_t* context,
+                                     iree_vm_module_t* module,
+                                     iree_vm_module_state_t** out_module_state);
 
 // Registers a list of modules with the context and resolves imports in the
 // order provided.

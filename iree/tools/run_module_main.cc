@@ -21,6 +21,7 @@
 #include "iree/base/init.h"
 #include "iree/base/source_location.h"
 #include "iree/base/status.h"
+#include "iree/base/tracing.h"
 #include "iree/modules/hal/hal_module.h"
 #include "iree/tools/vm_util.h"
 #include "iree/vm/bytecode_module.h"
@@ -51,6 +52,7 @@ namespace iree {
 namespace {
 
 StatusOr<std::string> GetModuleContentsFromFlags() {
+  IREE_TRACE_SCOPE0("GetModuleContentsFromFlags");
   auto input_file = absl::GetFlag(FLAGS_input_file);
   std::string contents;
   if (input_file == "-") {
@@ -63,6 +65,8 @@ StatusOr<std::string> GetModuleContentsFromFlags() {
 }
 
 Status Run() {
+  IREE_TRACE_SCOPE0("iree-run-module");
+
   RETURN_IF_ERROR(FromApiStatus(iree_hal_module_register_types(), IREE_LOC))
       << "registering HAL types";
   iree_vm_instance_t* instance = nullptr;
@@ -123,24 +127,20 @@ Status Run() {
   RETURN_IF_ERROR(PrintVariantList(output_descs, outputs))
       << "printing results";
 
-  // TODO(gcmn): Some nice wrappers to make this pattern shorter with generated
-  // error messages.
-  // Deallocate:
-  RETURN_IF_ERROR(FromApiStatus(iree_vm_variant_list_free(inputs), IREE_LOC));
-  RETURN_IF_ERROR(FromApiStatus(iree_vm_variant_list_free(outputs), IREE_LOC));
-  RETURN_IF_ERROR(FromApiStatus(iree_vm_module_release(hal_module), IREE_LOC));
-  RETURN_IF_ERROR(
-      FromApiStatus(iree_vm_module_release(input_module), IREE_LOC));
-  RETURN_IF_ERROR(FromApiStatus(iree_hal_device_release(device), IREE_LOC));
-  RETURN_IF_ERROR(FromApiStatus(iree_vm_context_release(context), IREE_LOC));
-  RETURN_IF_ERROR(FromApiStatus(iree_vm_instance_release(instance), IREE_LOC));
+  iree_vm_variant_list_free(inputs);
+  iree_vm_variant_list_free(outputs);
+  iree_vm_module_release(hal_module);
+  iree_vm_module_release(input_module);
+  iree_hal_device_release(device);
+  iree_vm_context_release(context);
+  iree_vm_instance_release(instance);
   return OkStatus();
 }
 
 }  // namespace
 
 extern "C" int main(int argc, char** argv) {
-  InitializeEnvironment(&argc, &argv);
+  iree::InitializeEnvironment(&argc, &argv);
   CHECK_OK(Run());
   return 0;
 }

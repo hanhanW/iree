@@ -18,7 +18,7 @@
 include "iree/compiler/Dialect/HAL/IR/HALBase.td"
 include "mlir/IR/OpAsmInterface.td"
 include "mlir/IR/SymbolInterfaces.td"
-include "mlir/Interfaces/SideEffects.td"
+include "mlir/Interfaces/SideEffectInterfaces.td"
 
 class HAL_PureOp<string mnemonic, list<OpTrait> traits = []> :
     HAL_Op<mnemonic, !listconcat(traits, [NoSideEffect])>;
@@ -1156,6 +1156,11 @@ def HAL_CommandBufferDispatchOp : HAL_Op<"command_buffer.dispatch"> {
       Value executable, IREE::HAL::ExecutableEntryPointOp entryPoint,
       Value workgroupX, Value workgroupY, Value workgroupZ
     }]>,
+    OpBuilder<[{
+      Builder &builder, OperationState &state, Value commandBuffer,
+      Value executable, unsigned entryPointOrdinal,
+      Value workgroupX, Value workgroupY, Value workgroupZ
+    }]>,
   ];
 }
 
@@ -2020,12 +2025,6 @@ def HAL_ExecutableLayoutLookupOp : HAL_PureOp<"executable_layout.lookup", [
 }
 
 //===----------------------------------------------------------------------===//
-// iree::hal::Fence
-//===----------------------------------------------------------------------===//
-
-// TODO(benvanik): fence query.
-
-//===----------------------------------------------------------------------===//
 // iree::hal::RingBuffer
 //===----------------------------------------------------------------------===//
 
@@ -2035,6 +2034,107 @@ def HAL_ExecutableLayoutLookupOp : HAL_PureOp<"executable_layout.lookup", [
 // iree::hal::Semaphore
 //===----------------------------------------------------------------------===//
 
-// TODO(benvanik): semaphore query/set.
+def HAL_SemaphoreCreateOp : HAL_Op<"semaphore.create", [
+    DeclareOpInterfaceMethods<OpAsmOpInterface>,
+  ]> {
+  let summary = [{semaphore allocation operation}];
+  let description = [{
+    Returns a semaphore from the device pool with the given initial value.
+  }];
+
+  let arguments = (ins
+    HAL_Device:$device,
+    HAL_TimelineValue:$initial_value
+  );
+  let results = (outs
+    HAL_Semaphore:$result
+  );
+
+  let assemblyFormat = [{
+    $device `,` `initial_value` `=` $initial_value
+    attr-dict-with-keyword `:` type($result)
+  }];
+}
+
+def HAL_SemaphoreQueryOp : HAL_Op<"semaphore.query"> {
+  let summary = [{semaphore payload value query}];
+  let description = [{
+    Queries the current payload and returns a tuple of `(status, value)`.
+    As the payload is monotonically increasing it is guaranteed that
+    the value is at least equal to the previous result of a
+    `hal.semaphore.signal` call and coherent with any waits for a
+    specified value via `hal.semaphore.await`.
+  }];
+
+  let arguments = (ins
+    HAL_Semaphore:$semaphore
+  );
+  let results = (outs
+    IREE_Status:$status,
+    HAL_TimelineValue:$value
+  );
+
+  let assemblyFormat = [{
+    $semaphore attr-dict-with-keyword `:` type($status) `,` type($value)
+  }];
+}
+
+def HAL_SemaphoreSignalOp : HAL_Op<"semaphore.signal"> {
+  let summary = [{semaphore payload value signal operation}];
+  let description = [{
+    Signals the semaphore to the given payload value.
+    The call is ignored if the current payload value exceeds `new_value`.
+  }];
+
+  let arguments = (ins
+    HAL_Semaphore:$semaphore,
+    HAL_TimelineValue:$new_value
+  );
+
+  let assemblyFormat = [{
+    $semaphore `,` `value` `=` $new_value attr-dict-with-keyword
+  }];
+}
+
+def HAL_SemaphoreFailOp : HAL_Op<"semaphore.fail"> {
+  let summary = [{semaphore asynchronous failure operation}];
+  let description = [{
+    Signals the semaphore with a failure. The `status` will be returned from
+    `hal.semaphore.query` and `hal.semaphore.signal` for the lifetime
+    of the semaphore.
+  }];
+
+  let arguments = (ins
+    HAL_Semaphore:$semaphore,
+    IREE_Status:$status
+  );
+
+  let assemblyFormat = [{
+    $semaphore `,` `status` `=` $status attr-dict-with-keyword
+  }];
+}
+
+// TODO(benvanik): rework this to make it a terminator with branch targets
+// for ^success and ^fail(status).
+def HAL_SemaphoreAwaitOp : HAL_Op<"semaphore.await", [YieldPoint]> {
+  let summary = [{asynchronous semaphore wait operation}];
+  let description = [{
+    Yields the caller until the semaphore reaches or exceeds the specified
+    payload `min_value`. Returns the `status` of the semaphore after the wait,
+    with a non-zero value indicating failure.
+  }];
+
+  let arguments = (ins
+    HAL_Semaphore:$semaphore,
+    HAL_TimelineValue:$min_value
+  );
+  let results = (outs
+    IREE_Status:$status
+  );
+
+  let assemblyFormat = [{
+    $semaphore `,` `min_value` `=` $min_value attr-dict-with-keyword `:` type($status)
+  }];
+}
 
 #endif  // IREE_DIALECT_HAL_OPS

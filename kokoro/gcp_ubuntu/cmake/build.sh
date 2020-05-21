@@ -22,17 +22,13 @@ set -x
 # Print the UTC time when set -x is on
 export PS4='[$(date -u "+%T %Z")] '
 
-export CMAKE_BIN="$(which cmake)"
-export CC="$(which clang-6.0)"
-export CXX="$(which clang++-6.0)"
-
 # Check these exist and print the versions for later debugging
+export CMAKE_BIN="$(which cmake)"
 "$CMAKE_BIN" --version
 "$CC" --version
 "$CXX" --version
+python3 --version
 
-# Kokoro checks out the repository here.
-cd ${KOKORO_ARTIFACTS_DIR?}/github/iree
 echo "Initializing submodules"
 ./scripts/git/submodule_versions.py init
 

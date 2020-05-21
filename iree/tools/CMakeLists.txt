@@ -40,6 +40,7 @@ iree_cc_binary(
     iree::base::localfile
     iree::base::source_location
     iree::base::status
+    iree::base::tracing
     iree::modules::hal
     iree::testing::benchmark_main
     iree::vm::bytecode_module
@@ -80,6 +81,7 @@ iree_cc_binary(
     iree::base::localfile
     iree::base::source_location
     iree::base::status
+    iree::base::tracing
     iree::modules::hal
     iree::vm::bytecode_module
     ${IREE_HAL_DRIVER_MODULES}
@@ -120,10 +122,10 @@ if(${IREE_BUILD_COMPILER})
       MLIRLinalgToLLVM
       MLIRLinalgToSPIRVTransforms
       MLIRLinalgTransforms
-      MLIRLoopOps
-      MLIRLoopOpsTransforms
-      MLIRLoopsToGPU
       MLIRQuant
+      MLIRSCF
+      MLIRSCFToGPU
+      MLIRSCFTransforms
       MLIRSDBM
       MLIRSPIRV
       MLIRSPIRVTransforms
@@ -147,6 +149,7 @@ if(${IREE_BUILD_COMPILER})
       iree::compiler::Dialect::VMLA::IR::VMLADialect
       iree::compiler::Dialect::VMLA::Transforms
       iree::compiler::Dialect::Vulkan::IR
+      iree::compiler::Translation::IREEVM
     PUBLIC
   )
 
@@ -189,6 +192,7 @@ if(${IREE_BUILD_COMPILER})
     HDRS
       "init_translations.h"
     DEPS
+      iree::compiler::Translation::IREEVM
       MLIRSPIRVSerialization
   )
 
@@ -207,11 +211,14 @@ if(${IREE_BUILD_COMPILER})
       MLIROptLib
       MLIRPass
       MLIRSupport
+      iree::compiler::Conversion::init_conversions
+      iree::compiler::Conversion::HLOToLinalg
       iree::compiler::Dialect::Flow::Analysis
       iree::compiler::Dialect::Flow::IR
       iree::compiler::Dialect::Flow::Transforms
       iree::compiler::Dialect::HAL::Conversion::FlowToHAL
       iree::compiler::Dialect::HAL::Conversion::HALToVM
+      iree::compiler::Dialect::HAL::Conversion::Passes
       iree::compiler::Dialect::HAL::Transforms
       iree::compiler::Dialect::IREE::IR
       iree::compiler::Dialect::IREE::Transforms
@@ -226,8 +233,6 @@ if(${IREE_BUILD_COMPILER})
       iree::compiler::Dialect::VMLA::Transforms
       iree::compiler::Dialect::Vulkan::IR
       iree::compiler::Translation::IREEVM
-      iree::compiler::Translation::SPIRV::init_translations
-      iree::compiler::Translation::CodegenPasses
       tensorflow::mlir_xla
     PUBLIC
   )
@@ -255,7 +260,7 @@ if(${IREE_BUILD_COMPILER})
       ::vm_util
       LLVMSupport
       MLIRIR
-      MLIRLoopOpsTransforms
+      MLIRSCFTransforms
       MLIRParser
       MLIRPass
       MLIRSupport
@@ -267,6 +272,7 @@ if(${IREE_BUILD_COMPILER})
       iree::base::init
       iree::base::source_location
       iree::base::status
+      iree::base::tracing
       iree::compiler::Dialect::Flow::Transforms
       iree::compiler::Dialect::HAL::Transforms
       iree::compiler::Dialect::IREE::Transforms
@@ -295,14 +301,14 @@ if(${IREE_BUILD_COMPILER})
       ::init_xla_dialects
       LLVMSupport
       MLIRIR
-      MLIRLoopOpsTransforms
+      MLIRSCFTransforms
       MLIRPass
       MLIRSupport
       MLIRTranslation
+      iree::compiler::Conversion::init_conversions
       iree::compiler::Dialect::VM::Target::Bytecode
       iree::compiler::Dialect::VM::Target::init_targets
       iree::compiler::Translation::IREEVM
-      iree::compiler::Translation::SPIRV::init_translations
     PUBLIC
   )
 

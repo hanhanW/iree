@@ -50,6 +50,7 @@
 #include "mlir/Dialect/Linalg/EDSC/Builders.h"
 #include "mlir/Dialect/Linalg/EDSC/Intrinsics.h"
 #include "mlir/Dialect/SCF/EDSC/Builders.h"
+#include "mlir/Dialect/SCF/EDSC/Intrinsics.h"
 #include "mlir/Dialect/StandardOps/EDSC/Intrinsics.h"
 #include "mlir/Dialect/Vector/EDSC/Intrinsics.h"
 
@@ -145,11 +146,15 @@ class ModelBuilder : public OpBuilder {
                       ArrayRef<Type> results, ArrayRef<Type> args,
                       MLIRFuncOpConfig config = MLIRFuncOpConfig());
 
+  // Add GPU attribute to the module.
+  void addGPUAttr();
+
   // Build a MLIR GPU module. GPUFuncOp can later be added to the module.
   gpu::GPUModuleOp makeGPUModule(StringRef name);
 
   // Build a MLIR GPU kernel within a GPU module.
   gpu::GPUFuncOp makeGPUKernel(StringRef name, gpu::GPUModuleOp GPUModule,
+                               ArrayRef<int32_t> workgroupSize,
                                ArrayRef<Type> args = {},
                                ArrayRef<Type> results = {});
 

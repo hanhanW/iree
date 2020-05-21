@@ -78,26 +78,30 @@ static spirv::TargetEnvAttr getTargetEnv(MLIRContext *context) {
 
 gpu::GPUModuleOp mlir::ModelBuilder::makeGPUModule(StringRef name) {
   // Add module attributes required first.
-  module->setAttr(gpu::GPUDialect::getContainerModuleAttrName(),
-                  UnitAttr::get(module->getContext()));
-  spirv::TargetEnvAttr targetEnv = getTargetEnv(module->getContext());
-  module->setAttr(spirv::getTargetEnvAttrName(), targetEnv);
+  addGPUAttr();
   OpBuilder b(&module->getBodyRegion());
   auto kernelModule = b.create<gpu::GPUModuleOp>(loc, name);
   return kernelModule;
 }
 
-gpu::GPUFuncOp mlir::ModelBuilder::makeGPUKernel(StringRef name,
-                                                 gpu::GPUModuleOp GPUModule,
-                                                 ArrayRef<Type> args,
-                                                 ArrayRef<Type> results) {
+void mlir::ModelBuilder::addGPUAttr() {
+  // Add module attributes required first.
+  module->setAttr(gpu::GPUDialect::getContainerModuleAttrName(),
+                  UnitAttr::get(module->getContext()));
+  spirv::TargetEnvAttr targetEnv = getTargetEnv(module->getContext());
+  module->setAttr(spirv::getTargetEnvAttrName(), targetEnv);
+}
+
+gpu::GPUFuncOp mlir::ModelBuilder::makeGPUKernel(
+    StringRef name, gpu::GPUModuleOp GPUModule, ArrayRef<int32_t> workgroupSize,
+    ArrayRef<Type> args, ArrayRef<Type> results) {
   auto fnType = FunctionType::get(args, results, module->getContext());
   OpBuilder b(&GPUModule.body());
   auto kernelFunc = b.create<gpu::GPUFuncOp>(loc, name, fnType);
   kernelFunc.setAttr(gpu::GPUDialect::getKernelFuncAttrName(), b.getUnitAttr());
   kernelFunc.setAttr(
       spirv::getEntryPointABIAttrName(),
-      spirv::getEntryPointABIAttr({1, 1, 1}, module->getContext()));
+      spirv::getEntryPointABIAttr(workgroupSize, module->getContext()));
   return kernelFunc;
 }
 

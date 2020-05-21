@@ -15,7 +15,12 @@
 # Misc tools used to optimize, translate, and evaluate IREE.
 # Compiler tooling, like the compiler, is not designed to run on device and is tagged as "hostonly".
 
-load("//iree:build_defs.oss.bzl", "IREE_DRIVER_MODULES", "PLATFORM_VULKAN_DEPS")
+load(
+    "//iree:build_defs.oss.bzl",
+    "IREE_DRIVER_MODULES",
+    "PLATFORM_VULKAN_DEPS",
+    iree_cc_binary = "cc_binary",
+)
 
 package(
     default_visibility = ["//visibility:public"],
@@ -27,7 +32,7 @@ exports_files([
     "sanitizer_suppressions.txt",
 ])
 
-cc_binary(
+iree_cc_binary(
     name = "iree-benchmark-module",
     testonly = True,
     srcs = ["benchmark_module_main.cc"],
@@ -41,13 +46,14 @@ cc_binary(
         "//iree/base:localfile",
         "//iree/base:source_location",
         "//iree/base:status",
+        "//iree/base:tracing",
         "//iree/modules/hal",
         "//iree/testing:benchmark_main",
         "//iree/vm:bytecode_module",
     ] + PLATFORM_VULKAN_DEPS + IREE_DRIVER_MODULES,
 )
 
-cc_binary(
+iree_cc_binary(
     name = "iree-dump-module",
     srcs = ["dump_module_main.cc"],
     deps = [
@@ -83,6 +89,7 @@ cc_library(
         "//iree/compiler/Dialect/VMLA/IR:VMLADialect",
         "//iree/compiler/Dialect/VMLA/Transforms",
         "//iree/compiler/Dialect/Vulkan/IR",
+        "//iree/compiler/Translation:IREEVM",
         "@llvm-project//mlir:Affine",
         "@llvm-project//mlir:AffineTransforms",
         "@llvm-project//mlir:GPUDialect",
@@ -94,9 +101,9 @@ cc_library(
         "@llvm-project//mlir:LinalgToLLVM",
         "@llvm-project//mlir:LinalgToSPIRV",
         "@llvm-project//mlir:LinalgTransforms",
-        "@llvm-project//mlir:LoopsToGPUPass",
         "@llvm-project//mlir:QuantOps",
         "@llvm-project//mlir:SCFDialect",
+        "@llvm-project//mlir:SCFToGPUPass",
         "@llvm-project//mlir:SCFTransforms",
         "@llvm-project//mlir:SDBM",
         "@llvm-project//mlir:SPIRVDialect",
@@ -135,6 +142,7 @@ cc_library(
         "init_translations.h",
     ],
     deps = [
+        "//iree/compiler/Translation:IREEVM",
         "@llvm-project//mlir:SPIRVTranslateRegistration",
     ],
 )
@@ -159,9 +167,12 @@ cc_library(
         ":init_passes_and_dialects",
         ":init_targets",
         ":init_xla_dialects",
+        "//iree/compiler/Conversion:init_conversions",
+        "//iree/compiler/Conversion/HLOToLinalg",
         "//iree/compiler/Dialect/Flow/Analysis",
         "//iree/compiler/Dialect/Flow/IR",
         "//iree/compiler/Dialect/Flow/Transforms",
+        "//iree/compiler/Dialect/HAL/Conversion:Passes",
         "//iree/compiler/Dialect/HAL/Conversion/FlowToHAL",
         "//iree/compiler/Dialect/HAL/Conversion/HALToVM",
         "//iree/compiler/Dialect/HAL/Transforms",
@@ -179,8 +190,6 @@ cc_library(
         "//iree/compiler/Dialect/VMLA/Transforms",
         "//iree/compiler/Dialect/Vulkan/IR",
         "//iree/compiler/Translation:IREEVM",
-        "//iree/compiler/Translation/CodegenPasses",
-        "//iree/compiler/Translation/SPIRV:init_translations",
         "@llvm-project//llvm:support",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:MlirOptLib",
@@ -191,7 +200,7 @@ cc_library(
     ],
 )
 
-cc_binary(
+iree_cc_binary(
     name = "iree-opt",
     tags = ["hostonly"],
     deps = [
@@ -199,7 +208,7 @@ cc_binary(
     ],
 )
 
-cc_binary(
+iree_cc_binary(
     name = "iree-run-mlir",
     srcs = ["run_mlir_main.cc"],
     tags = ["hostonly"],
@@ -214,6 +223,7 @@ cc_binary(
         "//iree/base:api",
         "//iree/base:api_util",
         "//iree/base:source_location",
+        "//iree/base:tracing",
         "//iree/compiler/Dialect/Flow/Transforms",
         "//iree/compiler/Dialect/HAL/Transforms",
         "//iree/compiler/Dialect/IREE/Transforms",
@@ -237,7 +247,7 @@ cc_binary(
     ] + PLATFORM_VULKAN_DEPS + IREE_DRIVER_MODULES,
 )
 
-cc_binary(
+iree_cc_binary(
     name = "iree-run-module",
     srcs = ["run_module_main.cc"],
     deps = [
@@ -250,16 +260,14 @@ cc_binary(
         "//iree/base:localfile",
         "//iree/base:source_location",
         "//iree/base:status",
+        "//iree/base:tracing",
         "//iree/modules/hal",
         "//iree/vm:bytecode_module",
     ] + PLATFORM_VULKAN_DEPS + IREE_DRIVER_MODULES,
 )
 
-cc_binary(
+iree_cc_binary(
     name = "iree-tblgen",
-    linkopts = [
-        "-lpthread",
-    ],
     tags = ["hostonly"],
     deps = [
         "//iree/compiler/Dialect/IREE/Tools",
@@ -279,10 +287,10 @@ cc_library(
         ":init_targets",
         ":init_translations",
         ":init_xla_dialects",
+        "//iree/compiler/Conversion:init_conversions",
         "//iree/compiler/Dialect/VM/Target:init_targets",
         "//iree/compiler/Dialect/VM/Target/Bytecode",
         "//iree/compiler/Translation:IREEVM",
-        "//iree/compiler/Translation/SPIRV:init_translations",
         "@llvm-project//llvm:support",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Pass",
@@ -292,7 +300,7 @@ cc_library(
     ],
 )
 
-cc_binary(
+iree_cc_binary(
     name = "iree-translate",
     tags = ["hostonly"],
     deps = [

@@ -38,6 +38,8 @@ iree_check_single_backend_test_suite(
     srcs = [
         "abs.mlir",
         "add.mlir",
+        "batch_norm_inference.mlir",
+        "broadcast_add.mlir",
         "broadcast.mlir",
         "broadcast_in_dim.mlir",
         # TODO(GH-1851): Enalbe the test.
@@ -74,19 +76,15 @@ iree_check_single_backend_test_suite(
         "maximum.mlir",
         "minimum.mlir",
         "multiply.mlir",
+        "negate.mlir",
         "pad.mlir",
         "reduce.mlir",
         "remainder.mlir",
         "reshape.mlir",
-
-        # TODO(GH-1699): Enable after xla_hlo.reverse can be lowered to linalg.
-        # "reverse.mlir",
-        #
+        "reverse.mlir",
         "rsqrt.mlir",
         "select.mlir",
-
-        # TODO(GH-1693): Enable after standard dialect supports sine op.
-        # "sine.mlir",
+        "sine.mlir",
 
         # TODO(GH-1698): Enable after xla_hlo.slice is lowered to linalg and can
         # be handled effectively.
@@ -94,6 +92,8 @@ iree_check_single_backend_test_suite(
         #
         "sqrt.mlir",
         "subtract.mlir",
+        "tanh.mlir",
+        "torch_index_select.mlir",
         "transpose.mlir",
 
         # TODO(GH-1688): Enable after integer widths are handled
@@ -111,6 +111,7 @@ iree_check_single_backend_test_suite(
         "abs.mlir",
         "add.mlir",
         "batch_norm_inference.mlir",
+        "broadcast.mlir",
         "broadcast_in_dim.mlir",
         "clamp.mlir",
         "compare.mlir",
@@ -132,10 +133,13 @@ iree_check_single_backend_test_suite(
         "reduce_window.mlir",
         "remainder.mlir",
         "reshape.mlir",
+        "reverse.mlir",
         "rsqrt.mlir",
         "select.mlir",
+        "sine.mlir",
         "sqrt.mlir",
         "subtract.mlir",
+        "torch_index_select.mlir",
         "transpose.mlir",
         "while.mlir",
     ],
