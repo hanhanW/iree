@@ -14,30 +14,19 @@
 
 #include "bindings/java/com/google/iree/native/context_wrapper.h"
 
-#include "iree/base/api.h"
+#include "iree/base/api_util.h"
 #include "iree/base/logging.h"
 
 namespace iree {
 namespace java {
 
-Status ContextWrapper::Create() {
-  // TODO(jennik): Create the instance on the java side.
-  iree_vm_instance_t* instance;
-  auto instance_status =
-      iree_vm_instance_create(IREE_ALLOCATOR_SYSTEM, &instance);
-  if (instance_status != IREE_STATUS_OK) {
-    return Status(StatusCode(instance_status), "Could not create instance");
-  }
-
-  auto context_status =
-      iree_vm_context_create(instance, IREE_ALLOCATOR_SYSTEM, &context_);
-  if (context_status != IREE_STATUS_OK) {
-    return Status(StatusCode(context_status), "Could not create context");
-  }
-  return OkStatus();
+Status ContextWrapper::Create(InstanceWrapper instance_wrapper) {
+  return FromApiStatus(iree_vm_context_create(instance_wrapper.instance(),
+                                              IREE_ALLOCATOR_SYSTEM, &context_),
+                       IREE_LOC);
 }
 
-int ContextWrapper::GetId() { return iree_vm_context_id(context_); }
+int ContextWrapper::id() const { return iree_vm_context_id(context_); }
 
 }  // namespace java
 }  // namespace iree

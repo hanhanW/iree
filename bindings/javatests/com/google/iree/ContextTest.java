@@ -17,17 +17,33 @@
 package com.google.iree;
 
 import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.fail;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+// TODO(jennik): This is not really a context test anymore, so rename it as an e2e test.
 @RunWith(AndroidJUnit4.class)
 public final class ContextTest {
   @Test
-  public void create_createsContextWithId() {
-    Context context = new Context();
+  public void create_throwsExceptionWithoutNativeLib() throws Exception {
+    try {
+      new Instance();
+      fail();
+    } catch (IllegalStateException expected) {
+    }
+  }
+
+  @Test
+  public void create_createsContextWithId() throws Exception {
+    Instance.loadNativeLibrary();
+    Instance instance = new Instance();
+    Context context = new Context(instance);
+
     assertNotEquals(context.getId(), -1);
+
     context.free();
+    instance.free();
   }
 }

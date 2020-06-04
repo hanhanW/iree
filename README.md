@@ -52,7 +52,7 @@ you'd like to see!
 We also have some public talks that explain IREE's concepts and architecture:
 
 *   2020-03-18: Interactive HAL IR Walkthrough (Ben Vanik and core team)
-    ([recording](https://drive.google.com/open?id=1FDrW9wvmiCQsVNSNzTD_V0bYmBl0XTyQ))
+    ([recording](https://drive.google.com/file/d/1_sWDgAPDfrGQZdxAapSA90AD1jVfhp-f/view?usp=sharing))
 *   2020-01-31: End-to-end MLIR Workflow in IREE
     ([recording](https://drive.google.com/open?id=1os9FaPodPI59uj7JJI3aXnTzkuttuVkR)
     and
@@ -112,11 +112,9 @@ features and quarterly plans. Please check out for updated information.
 
 CI System      | Build System | Platform | Component       | Status
 :------------: | :----------: | :------: | :-------------: | :----:
-GitHub Actions | Bazel        | Linux    | Core            | [Workflow History](https://github.com/google/iree/actions?query=event%3Apush+workflow%3A%22Bazel+Build+-+Core%22)
-GitHub Actions | Bazel        | Linux    | Bindings        | [Workflow History](https://github.com/google/iree/actions?query=event%3Apush+workflow%3A%22Bazel+Build+-+Bindings%22)
 GitHub Actions | Bazel        | Linux    | Integrations    | [Workflow History](https://github.com/google/iree/actions?query=event%3Apush+workflow%3A%22Bazel+Build+-+Integrations%22)
 GitHub Actions | Bazel        | Linux    | Other           | [Workflow History](https://github.com/google/iree/actions?query=event%3Apush+workflow%3A%22Bazel+Build+-+Fallthrough%22)
-Kokoro         | Bazel        | Linux    | Core            | [![kokoro-status-bazel-linux](https://storage.googleapis.com/iree-oss-build-badges/bazel/build_status_linux.svg)](https://storage.googleapis.com/iree-oss-build-badges/bazel/build_result_linux.html)
+Kokoro         | Bazel        | Linux    | Core + Bindings | [![kokoro-status-bazel-linux](https://storage.googleapis.com/iree-oss-build-badges/bazel/build_status_linux.svg)](https://storage.googleapis.com/iree-oss-build-badges/bazel/build_result_linux.html)
 Kokoro         | CMake        | Linux    | Core + Bindings | [![kokoro-status-cmake-linux](https://storage.googleapis.com/iree-oss-build-badges/cmake/build_status_linux.svg)](https://storage.googleapis.com/iree-oss-build-badges/cmake/build_result_linux.html)
 
 ## License

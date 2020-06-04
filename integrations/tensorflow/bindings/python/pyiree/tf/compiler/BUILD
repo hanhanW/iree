@@ -54,6 +54,7 @@ SAVED_MODEL_TF_RUNTIME_DEPS = [
     ":disable_kernels": [],
     "//conditions:default": [
         "@org_tensorflow//tensorflow/core/kernels:array",
+        "@org_tensorflow//tensorflow/core/kernels:math",
     ],
 })
 
@@ -107,6 +108,7 @@ pybind_cc_library(
         "@llvm-project//mlir:IR",
         "@org_tensorflow//tensorflow/cc/saved_model:loader_lite",
         "@org_tensorflow//tensorflow/compiler/mlir/tensorflow:convert_graphdef",
+        "@org_tensorflow//tensorflow/core:core_cpu",
     ],
 )
 
@@ -114,6 +116,20 @@ iree_py_test(
     name = "saved_model_test",
     srcs = ["saved_model_test.py"],
     python_version = "PY3",
+    deps = INTREE_TENSORFLOW_PY_DEPS + NUMPY_DEPS + [
+        "@absl_py//absl/testing:absltest",
+        "//integrations/tensorflow/bindings/python/pyiree/tf/compiler",
+    ],
+)
+
+iree_py_test(
+    name = "signature_def_saved_model_test",
+    srcs = ["signature_def_saved_model_test.py"],
+    python_version = "PY3",
+    tags = [
+        "noga",
+        "nokokoro",
+    ],
     deps = INTREE_TENSORFLOW_PY_DEPS + NUMPY_DEPS + [
         "@absl_py//absl/testing:absltest",
         "//integrations/tensorflow/bindings/python/pyiree/tf/compiler",
