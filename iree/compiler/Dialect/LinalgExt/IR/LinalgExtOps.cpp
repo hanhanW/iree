@@ -6,12 +6,16 @@
 
 #include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtOps.h"
 
+#include <complex>
+
 #include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtDialect.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/SMLoc.h"
+#include "mlir/Dialect/Complex/IR/Complex.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
+#include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
@@ -557,6 +561,112 @@ SmallVector<Range> FftOp::getLoopBounds(OpBuilder &builder) {
   Value stride = builder.create<ShiftLeftOp>(loc, one, getStage());
   res.emplace_back(Range{/*offset=*/zero, size, /*stride=*/stride});
   return res;
+}
+
+LogicalResult FftOp::generateScalarImplementation(OpBuilder &b, Location loc,
+                                                  ValueRange ivs) {
+  Value real = getReal();
+  Value imag = getImag();
+  Value stage = getStage();
+  Value one = b.create<ConstantIndexOp>(loc, 1);
+  Value wholeSize = b.create<ShiftLeftOp>(loc, one, stage);
+  Value halfSize = b.create<SignedShiftRightOp>(loc, wholeSize, one);
+
+  auto rank = getOperandRank();
+  SmallVector<OpFoldResult> lhsIvs(ivs.begin(), ivs.end());
+  SmallVector<OpFoldResult> ones(rank, b.getIndexAttr(1));
+  SmallVector<OpFoldResult> sizes(rank, b.getIndexAttr(1));
+  sizes.back() = halfSize;
+  Value lhsReal =
+      b.create<memref::SubViewOp>(loc, real, lhsIvs, sizes, ones);
+  Value lhsImag =
+      b.create<memref::SubViewOp>(loc, imag, lhsIvs, sizes, ones);
+
+  SmallVector<OpFoldResult> rhsIvs(ivs.begin(), ivs.end());
+  rhsIvs.back() = b.create<AddIOp>(loc, ivs.back(), halfSize).getResult();
+  Value rhsReal =
+      b.create<memref::SubViewOp>(loc, real, rhsIvs, sizes, ones);
+  Value rhsImag =
+      b.create<memref::SubViewOp>(loc, imag, rhsIvs, sizes, ones);
+
+  SmallVector<AffineMap> maps(4, b.getMultiDimIdentityMap(rank));
+  // TODO(hanchung): Use getLoopIteratorTypes(), once tiling method is
+  // implemented.
+  SmallVector<StringRef> iterTypes(rank, getParallelIteratorTypeName());
+
+  auto f32Type = b.getF32Type();
+  auto cplxType = ComplexType::get(f32Type);
+  auto indexToF32 = [](OpBuilder &builder, Location loc, Value v) -> Value {
+    v = builder.create<IndexCastOp>(loc, builder.getI32Type(), v);
+    return builder.create<SIToFPOp>(loc, builder.getF32Type(), v);
+  };
+
+  //   w = exp(-2 * PI * j / m * I);
+  // -2 * PI * I
+#if 0
+  Value f32Zero =
+      b.create<ConstantFloatOp>(loc, llvm::APFloat(0.0), f32Type);
+  Value expCoeff =
+      b.create<ConstantFloatOp>(loc, llvm::APFloat(-2 * acos(-1)), f32Type);
+  expCoeff = b.create<DivFOp>(loc, expCoeff, indexToF32(b, loc, wholeSize));
+#endif
+  Value coeff = b.create<ConstantFloatOp>(
+      loc, llvm::APFloat(static_cast<float>(-2 * acos(-1))), f32Type);
+  coeff = b.create<DivFOp>(loc, coeff, indexToF32(b, loc, wholeSize));
+  auto genericOp = b.create<linalg::GenericOp>(
+      loc, TypeRange{}, ValueRange{},
+      ValueRange{lhsReal, lhsImag, rhsReal, rhsImag}, maps, iterTypes,
+      [&](OpBuilder &b, Location loc, ValueRange args) {
+        Value w = b.create<MulFOp>(
+            loc, coeff,
+            indexToF32(b, loc, b.create<linalg::IndexOp>(loc, rank - 1)));
+        Value w_real = b.create<math::CosOp>(loc, w);
+        Value w_imag = b.create<math::SinOp>(loc, w);
+        // t = w * a[k + j + mh];
+        //   (x + yi)(u + vi) = (xu - yv) + (xv + yu)i
+        Value xu = b.create<MulFOp>(loc, w_real, args[2]);
+        Value yv = b.create<MulFOp>(loc, w_imag, args[3]);
+        Value xv = b.create<MulFOp>(loc, w_real, args[3]);
+        Value yu = b.create<MulFOp>(loc, w_imag, args[2]);
+        Value t_real = b.create<SubFOp>(loc, xu, yv);
+        Value t_imag = b.create<AddFOp>(loc, xv, yu);
+
+        Value r1 = b.create<AddFOp>(loc, args[0], t_real);
+        Value r2 = b.create<AddFOp>(loc, args[1], t_imag);
+        Value r3 = b.create<SubFOp>(loc, args[0], t_real);
+        Value r4 = b.create<SubFOp>(loc, args[1], t_imag);
+        b.create<linalg::YieldOp>(loc, ValueRange{r1, r2, r3, r4});
+#if 0
+        Value lhs =
+            b.create<complex::CreateOp>(loc, cplxType, args[0], args[1]);
+        Value rhs =
+            b.create<complex::CreateOp>(loc, cplxType, args[2], args[3]);
+        //   w = exp(-2 * PI * j / m * I);
+        Value imagCoeff = b.create<MulFOp>(
+            loc, expCoeff,
+            indexToF32(b, loc, b.create<linalg::IndexOp>(loc, 0)));
+        Value w =
+            b.create<complex::CreateOp>(loc, cplxType, f32Zero, imagCoeff);
+        w = b.create<complex::ExpOp>(loc, cplxType, w);
+
+        // t = w * a[k + j + mh];
+        // u = a[k + j];
+        Value t = b.create<complex::MulOp>(loc, w, rhs);
+        Value u = lhs;
+
+        // a[k + j] = u + t;
+        // a[k + j + mh] = u - t;
+        Value res1 = b.create<complex::AddOp>(loc, u, t);
+        Value res2 = b.create<complex::SubOp>(loc, u, t);
+        b.create<linalg::YieldOp>(
+            loc, ValueRange{b.create<complex::ReOp>(loc, f32Type, res1),
+                            b.create<complex::ImOp>(loc, f32Type, res1),
+                            b.create<complex::ReOp>(loc, f32Type, res2),
+                            b.create<complex::ImOp>(loc, f32Type, res2)});
+#endif
+      });
+
+  return success();
 }
 
 #define DEFINE_OP_GET_EFFECTS(OP_NAME)                                    \
