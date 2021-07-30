@@ -44,6 +44,17 @@ static SmallVector<int64_t> extract1DVector(DenseIntElementsAttr elements) {
   return ret;
 }
 
+/// Generates `tensor.dim` operations to get the dynamic sizes of a value `v`.
+static SmallVector<Value, 4> getDynamicDimValues(OpBuilder &b, Location loc,
+                                                 Value v) {
+  SmallVector<Value, 4> dynamicDims;
+  for (auto dim : llvm::enumerate(v.getType().cast<ShapedType>().getShape())) {
+    if (dim.value() != ShapedType::kDynamicSize) continue;
+    dynamicDims.push_back(b.createOrFold<tensor::DimOp>(loc, v, dim.index()));
+  }
+  return dynamicDims;
+}
+
 namespace {
 
 //===----------------------------------------------------------------------===//
@@ -242,6 +253,106 @@ struct ScatterOpConversion : public OpConversionPattern<mhlo::ScatterOp> {
   }
 };
 
+struct FftOpConversion : public OpConversionPattern<mhlo::FftOp> {
+  using OpConversionPattern<mhlo::FftOp>::OpConversionPattern;
+
+  static SmallVector<Value> getBitReversalOrder(ImplicitLocOpBuilder &b,
+                                                Value real, int fftLength) {
+    auto realType = real.getType().cast<ShapedType>();
+    auto rank = realType.getRank();
+
+    SmallVector<Value> dynSizes;
+    for (auto en : llvm::enumerate(realType.getShape())) {
+      if (en.value() == ShapedType::kDynamicSize) {
+        dynSizes.push_back(b.create<tensor::DimOp>(real, en.index()));
+      }
+    }
+    Value initTensor = b.create<linalg::InitTensorOp>(
+        dynSizes, realType.getShape(), realType.getElementType());
+
+    int logn = std::log(fftLength) / std::log(2);
+    SmallVector<AffineMap> maps(2, b.getMultiDimIdentityMap(rank));
+    SmallVector<StringRef> iterTypes(rank, getParallelIteratorTypeName());
+
+    auto genericOp = b.create<linalg::GenericOp>(
+        TypeRange{realType}, real, initTensor, maps, iterTypes,
+        [&](OpBuilder &b, Location loc, ValueRange args) {
+          SmallVector<Value> ivs;
+          for (auto i : llvm::seq<unsigned>(0, rank)) {
+            ivs.push_back(b.create<linalg::IndexOp>(loc, i));
+          }
+          Value idx = b.create<ConstantIndexOp>(loc, 0);
+          for (auto i : llvm::seq<unsigned>(0, logn)) {
+            Value x = b.create<SignedShiftRightOp>(
+                loc, ivs.back(), b.create<ConstantIndexOp>(loc, i));
+            x = b.create<AndOp>(loc, x, b.create<ConstantIndexOp>(loc, 1));
+            x = b.create<ShiftLeftOp>(
+                loc, x, b.create<ConstantIndexOp>(loc, logn - i - 1));
+            idx = b.create<OrOp>(loc, idx, x);
+          }
+          ivs.back() = idx;
+          b.create<linalg::YieldOp>(
+              loc, b.create<tensor::ExtractOp>(loc, real, ivs).getResult());
+        });
+    return {
+        genericOp.getResult(0),
+        b.create<ConstantOp>(
+            realType, DenseFPElementsAttr::get(
+                          realType, b.getF32FloatAttr(0.0).cast<Attribute>()))};
+  }
+
+  LogicalResult matchAndRewrite(
+      mhlo::FftOp op, ArrayRef<Value> args,
+      ConversionPatternRewriter &rewriter) const final {
+        // Only handle 2^n fft length.
+    mhlo::FftOpAdaptor adaptor(args);
+    auto operandType = adaptor.operand().getType().dyn_cast<RankedTensorType>();
+    if (!operandType || !operandType.hasStaticShape()) {
+      return failure();
+    }
+    int fftLength =
+        op.fft_length().getSplatValue().cast<IntegerAttr>().getInt();
+    if (fftLength & (fftLength - 1)) {
+      return rewriter.notifyMatchFailure(
+          op, "expected FFT length to be a power of two");
+    }
+
+    ImplicitLocOpBuilder b(op.getLoc(), rewriter);
+    SmallVector<Value> results =
+        getBitReversalOrder(b, adaptor.operand(), fftLength);
+    int lognPlus1 = std::log(fftLength) / std::log(2) + 1;
+    for (auto s : llvm::seq<unsigned>(1, lognPlus1)) {
+      auto fft = b.create<linalg_ext::FftOp>(
+          TypeRange{results[0].getType(), results[1].getType()},
+          ValueRange{b.create<ConstantIndexOp>(s)}, results);
+      results = fft.getResults();
+    }
+
+    SmallVector<int64_t> shape(operandType.getShape().begin(),
+                               operandType.getShape().end());
+    shape.back() = fftLength / 2 + 1;
+    auto ty = RankedTensorType::get(shape, operandType.getElementType());
+    SmallVector<OpFoldResult> offsets(ty.getRank(), b.getIndexAttr(0));
+    SmallVector<OpFoldResult> strides(ty.getRank(), b.getIndexAttr(1));
+    SmallVector<OpFoldResult> sizes;
+    Value operand = adaptor.operand();
+    for (auto dim : llvm::enumerate(operandType.getShape().drop_back())) {
+      if (dim.value() != ShapedType::kDynamicSize) {
+        sizes.push_back(b.getIndexAttr(dim.value()));
+      } else {
+        sizes.push_back(b.createOrFold<tensor::DimOp>(operand, dim.index()));
+      }
+    }
+    sizes.push_back(b.getIndexAttr(shape.back()));
+    auto real = b.create<tensor::ExtractSliceOp>(ty, results[0], offsets, sizes,
+                                                 strides);
+    auto imag = b.create<tensor::ExtractSliceOp>(ty, results[1], offsets, sizes,
+                                                 strides);
+    rewriter.replaceOpWithNewOp<mhlo::ComplexOp>(op, op.getType(), real, imag);
+    return success();
+  }
+};
+
 //===----------------------------------------------------------------------===//
 // Pass
 //===----------------------------------------------------------------------===//
@@ -258,7 +369,8 @@ struct ConvertMHLOToLinalgExtPass
     OwningRewritePatternList patterns(&getContext());
     MLIRContext *context = &getContext();
 
-    patterns.insert<SortOpConversion, ScatterOpConversion>(context);
+    patterns.insert<SortOpConversion, ScatterOpConversion, FftOpConversion>(
+        context);
     patterns.insert<LinalgExtRegionHLOOpConversion<mhlo::CompareOp>,
                     LinalgExtRegionHLOOpConversion<mhlo::AddOp>,
                     LinalgExtRegionReturnOpConversion>(context,
@@ -268,7 +380,8 @@ struct ConvertMHLOToLinalgExtPass
     target.addLegalDialect<linalg_ext::LinalgExtDialect, linalg::LinalgDialect,
                            IREE::Flow::FlowDialect, StandardOpsDialect,
                            tensor::TensorDialect>();
-    target.addIllegalOp<mhlo::SortOp, mhlo::ScatterOp>();
+    target.addIllegalOp<mhlo::SortOp, mhlo::ScatterOp, mhlo::FftOp>();
+    target.addLegalOp<mhlo::ComplexOp>();
 
     if (failed(applyPartialConversion(getOperation(), target,
                                       std::move(patterns)))) {

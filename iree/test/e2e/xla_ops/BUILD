@@ -182,7 +182,6 @@ iree_check_single_backend_test_suite(
             "dynamic_update_slice.mlir",
             "exponential.mlir",
             "exponential_minus_one.mlir",
-            "fft.mlir",
             "finite.mlir",
             "floor.mlir",
             "gather.mlir",
@@ -213,6 +212,7 @@ iree_check_single_backend_test_suite(
         include = ["*.mlir"],
         exclude = [
             "round.mlir",
+            "fft.mlir",
             "scatter.mlir",  # TODO(GH-6000): Enable the test.
             "sort.mlir",
         ],
