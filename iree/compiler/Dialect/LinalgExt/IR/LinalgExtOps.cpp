@@ -8,6 +8,7 @@
 
 #include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtDialect.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/SMLoc.h"
@@ -764,17 +765,27 @@ Operation *FftOp::getTiledImplementation(OpBuilder &builder, ValueRange outputs,
 //===----------------------------------------------------------------------===//
 
 static LogicalResult verifyReverseOp(ReverseOp op) {
-  if (op.getNumInputs()) {
-    return op.emitOpError("expected no inputs");
+  if (op.getNumInputs() != 1) {
+    return op.emitOpError("expected exactly one output");
   }
   if (op.getNumOutputs() != 1) {
     return op.emitOpError("expected exactly one output");
   }
+  if (op.input().getType() != op.output().getType()) {
+    return op.emitOpError("expected input/output types are identical");
+  }
 
   int64_t rank = op.getOperandRank();
-  int dimension = op.dimension();
-  if (dimension < 0 || dimension >= rank) {
-    return op.emitOpError("dimension must be within (0, ") << rank << "]";
+  llvm::SmallSetVector<int64_t, 4> s;
+  for (auto dim : op.dims()) {
+    if (dim < 0 || dim >= rank) {
+      return op.emitOpError("all the dimensions must be within [0, ")
+             << rank << ")";
+    }
+    if (s.contains(dim)) {
+      return op.emitOpError("expected dimensions numbers are all unique");
+    }
+    s.insert(dim);
   }
 
   return success();
@@ -794,12 +805,9 @@ SmallVector<Range> ReverseOp::getLoopBounds(OpBuilder &builder) {
   Value one = builder.create<ConstantIndexOp>(loc, 1);
   SmallVector<Range> ranges;
   for (auto dim : llvm::seq<int64_t>(0, getOperandRank())) {
-    Value ub = getDimValue(builder, loc, operand(), dim);
+    Value ub = getDimValue(builder, loc, input(), dim);
     ranges.emplace_back(Range{zero, ub, one});
   }
-  auto dim = dimension();
-  ranges[dim].size = builder.create<SignedDivIOp>(
-      loc, ranges[dim].size, builder.create<ConstantIndexOp>(loc, 2));
   return ranges;
 }
 
@@ -807,19 +815,69 @@ LogicalResult ReverseOp::generateScalarImplementation(OpBuilder &b,
                                                       Location loc,
                                                       ValueRange ivs) {
   SmallVector<Value> mirrorIndices(ivs.begin(), ivs.end());
-  auto dim = dimension();
-  auto size = getDimValue(b, loc, operand(), dim);
-  size = b.create<SubIOp>(loc, size, b.create<ConstantIndexOp>(loc, 1));
-  mirrorIndices[dim] = b.create<SubIOp>(loc, size, mirrorIndices[dim]);
+  for (auto dim : dims()) {
+    auto size = getDimValue(b, loc, input(), dim);
+    size = b.create<SubIOp>(loc, size, b.create<ConstantIndexOp>(loc, 1));
+    mirrorIndices[dim] = b.create<SubIOp>(loc, size, mirrorIndices[dim]);
+  }
 
-  // for (int i = 0; i < n / 2; ++i) {
-  //   swap(array[i], array[n - 1 - i]);
-  // }
-  Value v1 = b.create<memref::LoadOp>(loc, operand(), ivs);
-  Value v2 = b.create<memref::LoadOp>(loc, operand(), mirrorIndices);
-  b.create<memref::StoreOp>(loc, v1, operand(), mirrorIndices);
-  b.create<memref::StoreOp>(loc, v2, operand(), ivs);
+  Value val = b.create<memref::LoadOp>(loc, input(), ivs);
+  b.create<memref::StoreOp>(loc, val, output(), mirrorIndices);
   return success();
+}
+
+static Value getValueOrCreateConstantIndexOp(OpBuilder &b, Location loc,
+                                            OpFoldResult ofr) {
+  if (auto value = ofr.dyn_cast<Value>())
+    return value;
+  auto attr = ofr.dyn_cast<Attribute>().dyn_cast<IntegerAttr>();
+  assert(attr && "expect the op fold result casts to an integer attribute");
+  return b.create<ConstantIndexOp>(loc, attr.getValue().getSExtValue());
+}
+
+Operation *ReverseOp::getTiledImplementation(OpBuilder &builder,
+                                             ValueRange outputs,
+                                             ArrayRef<OpFoldResult> offsets,
+                                             ArrayRef<OpFoldResult> sizes,
+                                             SmallVectorImpl<Value> &results) {
+  int64_t rank = getOperandRank();
+  SmallVector<OpFoldResult> strides(rank, builder.getI64IntegerAttr(1));
+  Location loc = getLoc();
+  SmallVector<Value> tiledOperands;
+  tiledOperands.emplace_back(
+      getSlice(builder, loc, input(), offsets, sizes, strides));
+
+  SmallVector<OpFoldResult> mirrorOffsets(offsets.begin(), offsets.end());
+  for (auto dim : dims()) {
+    auto size = getDimValue(builder, loc, input(), dim);
+    Value mirrorOffset =
+        getValueOrCreateConstantIndexOp(builder, loc, mirrorOffsets[dim]);
+    mirrorOffset = builder.create<SubIOp>(loc, size, mirrorOffset);
+    mirrorOffset = builder.create<SubIOp>(
+        loc, mirrorOffset, getDimValue(builder, loc, tiledOperands[0], dim));
+    mirrorOffsets[dim] = mirrorOffset;
+  }
+
+  SmallVector<Type, 4> resultTypes;
+  if (hasTensorSemantics()) {
+    tiledOperands.emplace_back(
+        getSlice(builder, loc, output(), offsets, sizes, strides));
+    resultTypes.push_back(tiledOperands[1].getType());
+  } else {
+    tiledOperands.emplace_back(
+        getSlice(builder, loc, output(), mirrorOffsets, sizes, strides));
+  }
+
+  Operation *tiledRevOp = cast<LinalgExtOp>(getOperation())
+                              .clone(builder, loc, resultTypes, tiledOperands);
+
+  for (auto result : llvm::enumerate(tiledRevOp->getResults())) {
+    auto insertSliceOp = builder.create<tensor::InsertSliceOp>(
+        loc, result.value(), outputs[result.index()], mirrorOffsets, sizes,
+        strides);
+    results.push_back(insertSliceOp.getResult());
+  }
+  return tiledRevOp;
 }
 
 #define DEFINE_OP_GET_EFFECTS(OP_NAME)                                    \
