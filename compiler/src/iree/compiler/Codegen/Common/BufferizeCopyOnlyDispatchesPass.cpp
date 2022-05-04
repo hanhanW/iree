@@ -29,6 +29,28 @@
 namespace mlir {
 namespace iree_compiler {
 
+static FailureOr<Value> cpuComprehensiveBufferizeAllocationFn(
+    OpBuilder &builder, Location loc, MemRefType memRefType,
+    ValueRange dynamicSizes, unsigned alignment) {
+  return builder
+      .create<memref::AllocaOp>(loc, memRefType, dynamicSizes,
+                                builder.getI64IntegerAttr(alignment))
+      .getResult();
+}
+
+static LogicalResult cpuComprehensiveBufferizeDeallocationFn(OpBuilder &builder,
+                                                             Location loc,
+                                                             Value allocation) {
+  return success();
+}
+
+static LogicalResult cpuComprehensiveBufferizeCopyFn(OpBuilder &builder,
+                                                     Location loc, Value from,
+                                                     Value to) {
+  createLinalgCopyOp(builder, loc, from, to);
+  return success();
+}
+
 namespace {
 
 /// Pass to bufferize early copy-only dispatches. This allows backends
@@ -80,7 +102,14 @@ void BufferizeCopyOnlyDispatchesPass::runOnOperation() {
 
   // Apply the bufferization passes.
   OpPassManager bufferizationPipeline(module.getOperationName());
-  addLinalgBufferizePasses(bufferizationPipeline);
+  BufferizationOptions::AllocationFn allocationFn =
+      cpuComprehensiveBufferizeAllocationFn;
+  BufferizationOptions::DeallocationFn deallocationFn =
+      cpuComprehensiveBufferizeDeallocationFn;
+  BufferizationOptions::MemCpyFn memcpyFn = cpuComprehensiveBufferizeCopyFn;
+  addIREEComprehensiveBufferizePasses(bufferizationPipeline, allocationFn,
+                                      deallocationFn, memcpyFn);
+  //addLinalgBufferizePasses(bufferizationPipeline);
   if (failed(runPipeline(bufferizationPipeline, module))) {
     return signalPassFailure();
   }
