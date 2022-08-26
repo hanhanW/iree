@@ -6,6 +6,7 @@
 
 # Tests for end-to-end IREE support of entire models or their close derivatives.
 
+load("//build_tools/bazel:build_defs.oss.bzl", "iree_cmake_extra_content")
 load("//build_tools/bazel:iree_lit_test.bzl", "iree_lit_test_suite")
 
 package(
@@ -31,6 +32,30 @@ iree_lit_test_suite(
     tools = [
         "//tools:iree-benchmark-module",
         "//tools:iree-compile",
+        "@llvm-project//llvm:FileCheck",
+    ],
+)
+
+iree_lit_test_suite(
+    name = "lit",
+    srcs = ["matmul_128x384x384.mlir"],
+    cfg = "//tests:lit.cfg.py",
+    # transform dialect spec files are MLIR files that specify a transformation,
+    # they need to be included as data.
+    data = [
+        "matmul_128x384x384_codegen_spec.mlir",
+        "matmul_128x384x384_dispatch_spec.mlir",
+    ],
+    tags = [
+        "noasan",
+        "nomsan",
+        "notsan",
+        "noubsan",
+    ],
+    tools = [
+        "//tools:iree-compile",
+        "//tools:iree-opt",
+        "//tools:iree-run-module",
         "@llvm-project//llvm:FileCheck",
     ],
 )
