@@ -1704,7 +1704,11 @@ void PackOp::build(OpBuilder &builder, OperationState &state, Value source,
   SmallVector<int64_t> staticTileSizes;
   SmallVector<Value> dynamicTileSizes;
   dispatchIndexOpFoldResults(innerTiles, dynamicTileSizes, staticTileSizes);
-  build(builder, state, output.getType(), source, output,
+  SmallVector<Type> resultType;
+  auto outputType = output.getType();
+  if (outputType.isa<RankedTensorType>())
+    resultType.push_back(outputType);
+  build(builder, state, resultType, source, output,
         outerDimsPerm.empty() ? nullptr
                               : builder.getDenseI64ArrayAttr(outerDimsPerm),
         builder.getDenseI64ArrayAttr(innerDimsPos), dynamicTileSizes,
@@ -2126,7 +2130,11 @@ void UnPackOp::build(OpBuilder &builder, OperationState &state, Value source,
   SmallVector<int64_t> staticTileSizes;
   SmallVector<Value> dynamicTileSizes;
   dispatchIndexOpFoldResults(innerTiles, dynamicTileSizes, staticTileSizes);
-  build(builder, state, output.getType(), source, output,
+  SmallVector<Type> resultType;
+  auto outputType = output.getType();
+  if (outputType.isa<RankedTensorType>())
+    resultType.push_back(outputType);
+  build(builder, state, resultType, source, output,
         outerDimsPerm.empty() ? nullptr
                               : builder.getDenseI64ArrayAttr(outerDimsPerm),
         builder.getDenseI64ArrayAttr(innerDimsPos), dynamicTileSizes,

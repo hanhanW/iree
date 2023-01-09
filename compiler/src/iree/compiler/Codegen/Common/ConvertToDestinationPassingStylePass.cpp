@@ -158,7 +158,8 @@ static LogicalResult replaceDestinationBuffer(OpResult resultValue,
                                               Value destinationValue) {
   Operation *op = resultValue.getOwner();
   return TypeSwitch<Operation *, LogicalResult>(op)
-      .Case<linalg::LinalgOp, IREE::LinalgExt::LinalgExtOp>([&](auto linalgOp) {
+      .Case<linalg::LinalgOp, IREE::LinalgExt::LinalgExtOp, tensor::PackOp,
+            tensor::UnPackOp>([&](auto linalgOp) {
         unsigned resultNumber = resultValue.getResultNumber();
         cast<DestinationStyleOpInterface>(linalgOp.getOperation())
             .setDpsInitOperand(resultNumber, destinationValue);

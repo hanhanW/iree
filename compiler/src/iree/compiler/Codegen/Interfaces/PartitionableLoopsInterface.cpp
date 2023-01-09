@@ -94,7 +94,7 @@ struct OuterParallelAsPartitionableLoops
     // loops, but that needs the interface to return the static sizes of the
     // loops.
     SmallVector<unsigned> partitionableLoops;
-    auto interfaceOp = cast<OpTy>(op);
+    auto interfaceOp = cast<TilingInterface>(op);
     for (auto [index, iteratorType] :
          llvm::enumerate(interfaceOp.getLoopIteratorTypes())) {
       if (iteratorType != utils::IteratorType::parallel) {
@@ -216,10 +216,6 @@ void registerPartitionableLoopsInterfaceModels(DialectRegistry &registry) {
   registry.addExtension(+[](MLIRContext *ctx,
                             IREE::LinalgExt::IREELinalgExtDialect *dialect) {
     IREE::LinalgExt::FftOp::attachInterface<FftOpPartitionableLoops>(*ctx);
-    IREE::LinalgExt::PackOp::attachInterface<
-        OuterParallelAsPartitionableLoops<IREE::LinalgExt::PackOp>>(*ctx);
-    IREE::LinalgExt::UnPackOp::attachInterface<
-        OuterParallelAsPartitionableLoops<IREE::LinalgExt::UnPackOp>>(*ctx);
     IREE::LinalgExt::ScanOp::attachInterface<
         AllParallelAsPartitionableLoops<IREE::LinalgExt::ScanOp>>(*ctx);
     IREE::LinalgExt::ScatterOp::attachInterface<
@@ -236,6 +232,12 @@ void registerPartitionableLoopsInterfaceModels(DialectRegistry &registry) {
     IREE::LinalgExt::WinogradOutputTransformOp::attachInterface<
         AllParallelAsPartitionableLoops<
             IREE::LinalgExt::WinogradOutputTransformOp>>(*ctx);
+  });
+  registry.addExtension(+[](MLIRContext *ctx, tensor::TensorDialect *dialect) {
+    tensor::PackOp::attachInterface<
+        OuterParallelAsPartitionableLoops<tensor::PackOp>>(*ctx);
+    tensor::UnPackOp::attachInterface<
+        OuterParallelAsPartitionableLoops<tensor::UnPackOp>>(*ctx);
   });
 }
 

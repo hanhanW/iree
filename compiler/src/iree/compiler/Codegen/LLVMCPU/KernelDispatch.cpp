@@ -1055,21 +1055,21 @@ static SmallVector<int64_t> getLinalgExtDefaultWorkgroupTileSizes(
 }
 
 static LogicalResult setRootConfig(func::FuncOp entryPointFn,
-                                   IREE::LinalgExt::PackOp op) {
-  TileSizesListType tileSizes = {
-      getLinalgExtDefaultWorkgroupTileSizes(op, defaultWorkgroupTileSize)};
+                                   tensor::PackOp op) {
+  TileSizesListType tileSizes = {getLinalgExtDefaultWorkgroupTileSizes(
+      op.getOperation(), defaultWorkgroupTileSize)};
   return setOpConfigAndEntryPointFnTranslation(
       entryPointFn, op, tileSizes, DispatchLoweringPassPipeline::CPUDataTiling);
 }
 
 static LogicalResult setRootConfig(
-    func::FuncOp entryPointFn, IREE::LinalgExt::UnPackOp op,
+    func::FuncOp entryPointFn, tensor::UnPackOp op,
     DispatchLoweringPassPipeline pipeline =
         DispatchLoweringPassPipeline::CPUDataTiling) {
   // TODO(#11505): Consider multi-level tiling for handling unpack + generic
   // cases.
-  SmallVector<int64_t> tileSizes =
-      getLinalgExtDefaultWorkgroupTileSizes(op, /*defaultSize=*/16);
+  SmallVector<int64_t> tileSizes = getLinalgExtDefaultWorkgroupTileSizes(
+      op.getOperation(), /*defaultSize=*/16);
 
   // Fixup for making tileSizes be multiple of inner_tile_sizes.
   SmallVector<int64_t> innerTiles = op.getStaticTiles();
@@ -1607,8 +1607,8 @@ static LogicalResult setRootConfigImpl(
           return setRootConfig(entryPointFn, op, LinalgOpInfo(op),
                                targetMLTransInfo);
         })
-        .Case<IREE::LinalgExt::FftOp, IREE::LinalgExt::PackOp,
-              IREE::LinalgExt::UnPackOp, linalg::Mmt4DOp,
+        .Case<IREE::LinalgExt::FftOp, tensor::PackOp,
+              tensor::UnPackOp, linalg::Mmt4DOp,
               linalg::Conv2DNhwcHwcfOp, linalg::Conv2DNchwFchwOp,
               linalg::DepthwiseConv2DNhwcHwcOp>(
             [&](auto op) { return setRootConfig(entryPointFn, op); })
@@ -1632,7 +1632,7 @@ static LogicalResult setVMVXRootConfigImpl(func::FuncOp entryPointFn,
   // Redirect to individual operations.
   auto setRootConfigFn = [&](Operation *op) -> LogicalResult {
     return TypeSwitch<Operation *, LogicalResult>(op)
-        .Case<IREE::LinalgExt::FftOp, IREE::LinalgExt::UnPackOp>([&](auto op) {
+        .Case<IREE::LinalgExt::FftOp, tensor::UnPackOp>([&](auto op) {
           return setRootConfig(entryPointFn, op,
                                DispatchLoweringPassPipeline::VMVXDefault);
         })

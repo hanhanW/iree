@@ -9,6 +9,8 @@
 // Wrapper pass to use MLIR's One-Shot Bufferize pass.
 //
 //===----------------------------------------------------------------------===//
+
+#include "iree-dialects/Dialect/LinalgExt/IR/LinalgExtDialect.h"
 #include "iree/compiler/Codegen/Interfaces/BufferizationInterfaces.h"
 #include "iree/compiler/Codegen/PassDetail.h"
 #include "iree/compiler/Codegen/Passes.h"
@@ -75,6 +77,7 @@ class IREEComprehensiveBufferizePass
                 func::FuncDialect,
                 IREE::Flow::FlowDialect,
                 IREE::Util::UtilDialect,
+                IREE::LinalgExt::IREELinalgExtDialect,
                 linalg::LinalgDialect,
                 memref::MemRefDialect,
                 scf::SCFDialect,
