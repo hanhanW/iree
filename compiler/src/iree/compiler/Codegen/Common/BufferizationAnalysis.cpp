@@ -195,12 +195,9 @@ static LogicalResult analysePadTensorOp(tensor::PadOp padTensorOp,
 
 /// For every result of the LinalgOp, gets the operands (`ins` or `outs`) whose
 /// buffer can be reused for the result.
-template <typename OpType>
-static SmallVector<Value> getTiedOperandsForLinalgOps(
-    OpType linalgOp, const BufferizationPlan &plan) {
-  auto dpsOp = dyn_cast<DestinationStyleOpInterface>(linalgOp.getOperation());
-  if (!dpsOp) return {};
-  SmallVector<Value> tiedOperands(linalgOp.getOperation()->getNumResults());
+static SmallVector<Value> getTiedOperandsForDPSOps(
+    DestinationStyleOpInterface dpsOp, const BufferizationPlan &plan) {
+  SmallVector<Value> tiedOperands(dpsOp.getOperation()->getNumResults());
   auto outputOperands = dpsOp.getDpsInitOperands();
   for (auto [index, outTensor] : llvm::enumerate(outputOperands)) {
     // If the `outs` tensor has a single use (this op) and is not from a
@@ -215,14 +212,11 @@ static SmallVector<Value> getTiedOperandsForLinalgOps(
 
 /// Adds the corresponding `outs` and result tensors of the linalg op into the
 /// same equivalence class.
-template <typename OpType>
-static LogicalResult analyseLinalgOps(OpType linalgOp,
-                                      BufferizationPlan &plan) {
-  auto dpsOp = dyn_cast<DestinationStyleOpInterface>(linalgOp.getOperation());
-  if (!dpsOp) return failure();
+static LogicalResult analyseDPSOps(DestinationStyleOpInterface dpsOp,
+                                   BufferizationPlan &plan) {
   if (!dpsOp.hasTensorSemantics()) return success();
-  auto results = linalgOp->getResults();
-  auto tiedOperands = getTiedOperandsForLinalgOps(linalgOp, plan);
+  auto results = dpsOp->getResults();
+  auto tiedOperands = getTiedOperandsForDPSOps(dpsOp, plan);
   if (tiedOperands.empty()) return failure();
   for (auto [index, resultTensor, tiedOperand] : llvm::zip_equal(
            llvm::seq<int64_t>(0, results.size()), results, tiedOperands)) {
@@ -508,12 +502,19 @@ LogicalResult createTensorEquivalenceClasses(func::FuncOp funcOp,
           return analysePadTensorOp(padTensorOp, plan);
         })
         .Case<linalg::LinalgOp>([&](linalg::LinalgOp linalgOp) {
-          return analyseLinalgOps(linalgOp, plan);
+          return analyseDPSOps(
+              cast<DestinationStyleOpInterface>(linalgOp.getOperation()), plan);
         })
         .Case<IREE::LinalgExt::LinalgExtOp>(
             [&](IREE::LinalgExt::LinalgExtOp linalgExtOp) {
-              return analyseLinalgOps(linalgExtOp, plan);
+              return analyseDPSOps(
+                  cast<DestinationStyleOpInterface>(linalgExtOp.getOperation()),
+                  plan);
             })
+        .Case<tensor::PackOp>([&](tensor::PackOp op) {
+          return analyseDPSOps(
+              cast<DestinationStyleOpInterface>(op.getOperation()), plan);
+        })
         .Case<tensor::CollapseShapeOp, tensor::ExpandShapeOp>(
             [&](auto reshapeOp) {
               return analyseSingleOperandResultOp(reshapeOp.getSrc(),

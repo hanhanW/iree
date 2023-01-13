@@ -158,12 +158,13 @@ static LogicalResult replaceDestinationBuffer(OpResult resultValue,
                                               Value destinationValue) {
   Operation *op = resultValue.getOwner();
   return TypeSwitch<Operation *, LogicalResult>(op)
-      .Case<linalg::LinalgOp, IREE::LinalgExt::LinalgExtOp>([&](auto linalgOp) {
-        unsigned resultNumber = resultValue.getResultNumber();
-        cast<DestinationStyleOpInterface>(linalgOp.getOperation())
-            .setDpsInitOperand(resultNumber, destinationValue);
-        return success();
-      })
+      .Case<linalg::LinalgOp, IREE::LinalgExt::LinalgExtOp, tensor::PackOp>(
+          [&](auto op) {
+            unsigned resultNumber = resultValue.getResultNumber();
+            cast<DestinationStyleOpInterface>(op.getOperation())
+                .setDpsInitOperand(resultNumber, destinationValue);
+            return success();
+          })
       .Case<tensor::EmptyOp>([&](auto emptyTensorOp) {
         emptyTensorOp.replaceAllUsesWith(destinationValue);
         return success();
@@ -207,8 +208,8 @@ static LogicalResult modifyResultToUseStoreBuffer(
     resultBuffer =
         TypeSwitch<Operation *, Value>(op)
             .Case<scf::IfOp, scf::ForOp, linalg::LinalgOp,
-                  IREE::LinalgExt::LinalgExtOp, tensor::InsertSliceOp,
-                  vector::TransferWriteOp>(
+                  IREE::LinalgExt::LinalgExtOp, tensor::PackOp,
+                  tensor::InsertSliceOp, vector::TransferWriteOp>(
                 [&](auto caseOp) { return resultBuffer; })
             .Case<tensor::InsertSliceOp>([&](auto insertSliceOp) -> Value {
               if (it->get() == insertSliceOp.getDest()) {
