@@ -31,6 +31,7 @@ iree_gentbl_cc_library(
 iree_compiler_cc_library(
     name = "Transforms",
     srcs = [
+        "ConstEvalSetEncodingOps.cpp",
         "CaptureDispatchDynamicDims.cpp",
         "CleanupNumericNarrowing.cpp",
         "CleanupTensorShapes.cpp",

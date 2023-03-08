@@ -190,6 +190,12 @@ def OptimizeNumerics :
   let constructor = "mlir::iree_compiler::IREE::Flow::createOptimizeNumericsPass()";
 }
 
+def ConstEvalSetEncodingOps :
+    Pass<"iree-flow-const-eval-set-encoding-ops", "mlir::ModuleOp"> {
+  let summary = "TBD";
+  let constructor = "mlir::iree_compiler::IREE::Flow::createConstEvalSetEncodingOpsPass()";
+}
+
 def OutlineDispatchRegions :
     Pass<"iree-flow-outline-dispatch-regions", "mlir::ModuleOp"> {
   let summary = "Outlines dispatch regions into executables";

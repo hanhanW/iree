@@ -197,7 +197,6 @@ void buildFlowTransformPassPipeline(OpPassManager &passManager,
   // The more we are able to equate shape dimensions at this level the better
   // our fusions will be.
   passManager.addPass(IREE::Flow::createExpandTensorShapesPass());
-  buildGlobalOptimizationPassPipeline(passManager, transformOptions);
 
   // Pad tensors.
   passManager.addPass(IREE::Flow::createTensorPadToTensorInsertSlicePass(
@@ -214,6 +213,18 @@ void buildFlowTransformPassPipeline(OpPassManager &passManager,
       .addPass(memref::createResolveShapedTypeResultDimsPass)
       .addPass(mlir::createCanonicalizerPass)
       .addPass(mlir::createCSEPass)
+      // Enable data tiling after all linalg level transformations.
+      .addPredicatedPass(clEnableDataTiling, createSetEncodingPass);
+  ////////////////////////////////////////////////////////////////////////
+  // Module pass to const eval set_encoding ops.
+  if (transformOptions.buildConstEvalPassPipeline) {
+    passManager.addPass(IREE::Flow::createConstEvalSetEncodingOpsPass());
+  }
+  buildGlobalOptimizationPassPipeline(passManager, transformOptions);
+
+  ////////////////////////////////////////////////////////////////////////
+  // Dispatch region formation.
+  FunctionLikeNest(passManager)
       // Elementwise fusion.
       .addPass([]() {
         return createFusionOfTensorOpsPass(clEnableAggressiveFusion);
@@ -232,10 +243,6 @@ void buildFlowTransformPassPipeline(OpPassManager &passManager,
       // transpose.
       .addPredicatedPass(clNormalizeInputIndexingMap,
                          createInterchangeTransposeGenericOpsPass)
-      // Enable data tiling after all linalg level transformations.
-      .addPredicatedPass(clEnableDataTiling, createSetEncodingPass)
-      ////////////////////////////////////////////////////////////////////////
-      // Dispatch region formation.
       .addPredicatedPass(!clDispatchTransformFileName.empty(),
                          [&]() {
                            return createDispatchWithTransformDialect(

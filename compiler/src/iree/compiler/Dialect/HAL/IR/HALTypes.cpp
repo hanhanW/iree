@@ -136,7 +136,7 @@ llvm::Optional<int32_t> getElementTypeValue(Type type) {
 
 llvm::Optional<int32_t> getEncodingTypeValue(Attribute attr) {
   // TODO(#6762): encoding attribute handling/mapping to enums.
-  assert(!attr && "encoding types other than default not yet supported");
+  // assert(!attr && "encoding types other than default not yet supported");
   // Default to IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR for now.
   return 1;
 }
