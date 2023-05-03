@@ -15,6 +15,7 @@ iree_lit_test_suite(
     lit
   SRCS
     "conv2d_to_img2col.mlir"
+    "enable_data_tiling.mlir"
     "pad_linalg_ops.mlir"
   TOOLS
     FileCheck

@@ -26,4 +26,11 @@ def PadLinalgOps :
   ];
 }
 
+def EnableDataTiling :
+    Pass<"iree-preprocessing-enable-data-tiling", "func::FuncOp"> {
+  let summary = "Convert linalg.matmul ops to tensor.pack + linalg.mmt4d + tensor.unpack ops";
+  let constructor =
+  "mlir::iree_compiler::IREE::createEnableDataTilingPass()";
+}
+
 #endif  // IREE_PREPROCESSING_COMMON_PASSES

@@ -17,6 +17,7 @@ iree_lit_test_suite(
     srcs = enforce_glob(
         [
             "conv2d_to_img2col.mlir",
+            "enable_data_tiling.mlir",
             "pad_linalg_ops.mlir",
         ],
         include = ["*.mlir"],

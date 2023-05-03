@@ -9,8 +9,10 @@
 
 #include <functional>
 
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Pass/PassOptions.h"
 
 namespace mlir {
 namespace iree_compiler {
@@ -22,6 +24,10 @@ std::unique_ptr<Pass> createConvertConv2DToImg2ColPass();
 
 // A pass to pad linalg ops to the next integer multiple of `paddingSize`.
 std::unique_ptr<Pass> createPadLinalgOpsToIntegerMultiplePass();
+
+// A pass to convert linalg.matmul ops to tensor.pack + mmt4d + tensor.unpack
+// ops.
+std::unique_ptr<OperationPass<func::FuncOp>> createEnableDataTilingPass();
 
 //===----------------------------------------------------------------------===//
 // Register all Passes
