@@ -29,6 +29,10 @@ std::unique_ptr<Pass> createPadLinalgOpsToIntegerMultiplePass();
 // ops.
 std::unique_ptr<OperationPass<func::FuncOp>> createEnableDataTilingPass();
 
+// A pass to propagate relayout ops (like tensor.pack/unpack) through other
+// operations.
+std::unique_ptr<OperationPass<func::FuncOp>> createDataLayoutPropagationPass();
+
 //===----------------------------------------------------------------------===//
 // Register all Passes
 //===----------------------------------------------------------------------===//

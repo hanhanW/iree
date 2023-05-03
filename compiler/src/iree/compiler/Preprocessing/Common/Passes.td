@@ -33,4 +33,11 @@ def EnableDataTiling :
   "mlir::iree_compiler::IREE::createEnableDataTilingPass()";
 }
 
+def DataLayoutPropagation :
+    Pass<"iree-preprocessing-data-layout-propagation", "func::FuncOp"> {
+  let summary = "Propagate relayout ops through linalg ops";
+  let constructor =
+  "mlir::iree_compiler::IREE::createDataLayoutPropagationPass()";
+}
+
 #endif  // IREE_PREPROCESSING_COMMON_PASSES
