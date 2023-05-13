@@ -247,6 +247,7 @@ void DecomposePackUnPackOpsPass::runOnOperation() {
       return signalPassFailure();
     }
   }
+  return;
 
   // Fold trailing unit dims away for linalg.transpose ops.
   {

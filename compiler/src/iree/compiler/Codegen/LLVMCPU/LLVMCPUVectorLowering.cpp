@@ -83,7 +83,6 @@ void LLVMCPUVectorLoweringPass::runOnOperation() {
         patterns, vectorTransformOptions,
         /*benefit=*/1,
         /*disableOuterProductLowering=*/true);
-    vector::populateVectorShapeCastLoweringPatterns(patterns);
     vector::populateVectorTransferPermutationMapLoweringPatterns(patterns);
     vector::populateVectorMultiReductionLoweringPatterns(
         patterns, vectorMultiReductionLowering);
@@ -111,22 +110,6 @@ void LLVMCPUVectorLoweringPass::runOnOperation() {
     (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
   }
 
-  {
-    RewritePatternSet patterns(ctx);
-    vector::populateVectorTransferLoweringPatterns(patterns,
-                                                   /*maxTransferRank=*/1);
-    auto vectorTransferToSCFOptions =
-        VectorTransferToSCFOptions().enableFullUnroll();
-    populateVectorToSCFConversionPatterns(patterns, vectorTransferToSCFOptions);
-    (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
-  }
-
-  LLVM_DEBUG({
-    llvm::dbgs() << "\n--- After lowering vector transfers to SCF ---\n";
-    funcOp.print(llvm::dbgs(), OpPrintingFlags().useLocalScope());
-    llvm::dbgs() << "\n\n";
-  });
-
   // Lowering for vector.transpose ops.
   {
     if (has16x16Transpose(funcOp)) {
@@ -151,6 +134,23 @@ void LLVMCPUVectorLoweringPass::runOnOperation() {
 
   LLVM_DEBUG({
     llvm::dbgs() << "\n--- After lowering vector transpose ops ---\n";
+    funcOp.print(llvm::dbgs(), OpPrintingFlags().useLocalScope());
+    llvm::dbgs() << "\n\n";
+  });
+
+  {
+    RewritePatternSet patterns(ctx);
+    vector::populateVectorTransferLoweringPatterns(patterns,
+                                                   /*maxTransferRank=*/1);
+    auto vectorTransferToSCFOptions =
+        VectorTransferToSCFOptions().enableFullUnroll();
+    populateVectorToSCFConversionPatterns(patterns, vectorTransferToSCFOptions);
+    vector::populateVectorShapeCastLoweringPatterns(patterns);
+    (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
+  }
+
+  LLVM_DEBUG({
+    llvm::dbgs() << "\n--- After lowering vector transfers to SCF ---\n";
     funcOp.print(llvm::dbgs(), OpPrintingFlags().useLocalScope());
     llvm::dbgs() << "\n\n";
   });

@@ -78,6 +78,49 @@ class TransposeUnitDimToShapeCast
   }
 };
 
+class TestPattern
+    : public OpRewritePattern<vector::TransferWriteOp> {
+ public:
+  using OpRewritePattern<vector::TransferWriteOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(vector::TransferWriteOp transferWriteOp,
+                                PatternRewriter& rewriter) const override {
+    auto loc = transferWriteOp.getLoc();
+    Value vector = transferWriteOp.getVector();
+    auto vectorType = cast<VectorType>(vector.getType());
+    Value source = transferWriteOp.getSource();
+    auto sourceType = dyn_cast<MemRefType>(source.getType());
+    if (!sourceType || !sourceType.hasStaticShape()) return failure();
+    if (sourceType.getNumElements() == vectorType.getNumElements())
+      return failure();
+    if (transferWriteOp.hasOutOfBoundsDim()) return failure();
+    if (!transferWriteOp.getPermutationMap().isMinorIdentity())
+      return failure();
+
+    SmallVector<OpFoldResult> offsets = transferWriteOp.getIndices();
+    int reducedRank = sourceType.getRank()- vectorType.getRank();
+    SmallVector<OpFoldResult> sizes(reducedRank, rewriter.getIndexAttr(1));
+    for (auto i : vectorType.getShape())
+      sizes.push_back(rewriter.getIndexAttr(i));
+    SmallVector<OpFoldResult> strides(sourceType.getRank(),
+                                      rewriter.getIndexAttr(1));
+
+    auto rankReducedType = canonicalizeStridedLayout(
+        cast<MemRefType>(memref::SubViewOp::inferRankReducedResultType(
+            vectorType.getShape(), sourceType, offsets, sizes, strides)));
+
+    auto extractSlice = rewriter.create<memref::SubViewOp>(
+        loc, rankReducedType, source, offsets, sizes, strides);
+
+    Value c0 = rewriter.create<arith::ConstantIndexOp>(loc, 0);
+    SmallVector<Value> zeros(vectorType.getRank(), c0);
+    rewriter.replaceOpWithNewOp<vector::TransferWriteOp>(
+        transferWriteOp, vector, extractSlice, zeros);
+
+    return success();
+  }
+};
+
 static void loopInvariantCodeMotion(func::FuncOp funcOp) {
   // Walk through all loops in a function in innermost-loop-first order. This
   // way, we first LICM from the inner loop, and place the ops in
@@ -99,6 +142,7 @@ struct OptimizeVectorTransferPass
       mlir::vector::populateCastAwayVectorLeadingOneDimPatterns(patterns);
       vector::ExtractOp::getCanonicalizationPatterns(patterns, &getContext());
       patterns.add<TransposeUnitDimToShapeCast>(&getContext());
+      patterns.add<TestPattern>(&getContext());
       mlir::vector::
           populateVectorTransferCollapseInnerMostContiguousDimsPatterns(
               patterns);
@@ -129,7 +173,7 @@ struct OptimizeVectorTransferPass
     if (flatten) {
       RewritePatternSet patterns(&getContext());
       mlir::vector::populateVectorTransferDropUnitDimsPatterns(patterns);
-      mlir::vector::populateFlattenVectorTransferPatterns(patterns);
+      //mlir::vector::populateFlattenVectorTransferPatterns(patterns);
       if (failed(applyPatternsAndFoldGreedily(funcOp, std::move(patterns)))) {
         return signalPassFailure();
       }

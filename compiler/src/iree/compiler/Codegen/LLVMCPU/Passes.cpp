@@ -597,6 +597,8 @@ void addCPUDataTilingPipeline(OpPassManager &passManager) {
   }
 
   addBufferizePasses(nestedModulePM);
+  nestedModulePM.addNestedPass<func::FuncOp>(
+      createOptimizeVectorTransferPass(/*flatten=*/true));
 
   {
     LLVMCPUVectorLoweringPassOptions options;
