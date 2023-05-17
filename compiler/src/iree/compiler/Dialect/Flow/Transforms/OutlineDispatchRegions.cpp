@@ -16,6 +16,7 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Linalg/IR/LinalgInterfaces.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Diagnostics.h"
@@ -205,18 +206,17 @@ static std::string summarizeDispatchWorkgroupsOp(
           LLVM_DEBUG(llvm::dbgs() << "// new best op: '" << bestOp->getName()
                                   << "', cost: " << bestEstimatedCost << "\n");
         })
-        .Case<IREE::LinalgExt::SetEncodingOp, IREE::LinalgExt::UnsetEncodingOp>(
-            [&](auto op) {
-              // SetEncoding/UnsetEncoding is the bestOp only if there are no
-              // other operations.
-              int64_t estimatedCost = kMinEstimatedCost + 1;
-              if (estimatedCost < bestEstimatedCost) return;
-              bestEstimatedCost = estimatedCost;
-              bestOp = op;
-              LLVM_DEBUG(llvm::dbgs()
-                         << "// new best op: '" << bestOp->getName()
-                         << "', cost: " << bestEstimatedCost << "\n");
-            })
+        .Case<IREE::LinalgExt::SetEncodingOp, IREE::LinalgExt::UnsetEncodingOp,
+              tensor::PackOp, tensor::UnPackOp>([&](auto op) {
+          // SetEncoding/UnsetEncoding is the bestOp only if there are no
+          // other operations.
+          int64_t estimatedCost = kMinEstimatedCost + 1;
+          if (estimatedCost < bestEstimatedCost) return;
+          bestEstimatedCost = estimatedCost;
+          bestOp = op;
+          LLVM_DEBUG(llvm::dbgs() << "// new best op: '" << bestOp->getName()
+                                  << "', cost: " << bestEstimatedCost << "\n");
+        })
         .Case<IREE::LinalgExt::LinalgExtOp>([&](auto op) {
           int64_t estimatedCost = estimateLinalgExtOpCost(op);
           if (estimatedCost < bestEstimatedCost) return;
@@ -249,6 +249,10 @@ static std::string summarizeDispatchWorkgroupsOp(
         ArrayRef<int64_t> shape = op.getResultType().getShape();
         bestSummary =
             opName + "_" + encoding.str() + "_" + loopRangesToString(shape);
+      })
+      .Case<tensor::PackOp, tensor::UnPackOp>([&](auto op) {
+        auto opName = getOpNameWithoutDialectName(op);
+        bestSummary = opName;
       })
       .Case<IREE::LinalgExt::LinalgExtOp>(
           [&](auto op) { bestSummary = summarizeLinalgExtOp(op); })
