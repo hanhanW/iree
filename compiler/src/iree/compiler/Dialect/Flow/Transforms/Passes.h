@@ -100,6 +100,8 @@ createFusionOfTensorOpsPass(bool fuseMultiUse = false,
 std::unique_ptr<InterfacePass<mlir::FunctionOpInterface>>
 createDataLayoutPropagationPass();
 
+std::unique_ptr<OperationPass<mlir::ModuleOp>> createConstEvalTensorOpsPass();
+
 // Infers and inserts util.numeric.optional_narrow ops at points that may be
 // beneficial.
 std::unique_ptr<Pass> createInferNumericNarrowingPass();

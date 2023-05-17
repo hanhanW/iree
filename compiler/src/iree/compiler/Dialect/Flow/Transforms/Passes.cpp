@@ -221,7 +221,6 @@ void buildFlowTransformPassPipeline(OpPassManager &passManager,
   // The more we are able to equate shape dimensions at this level the better
   // our fusions will be.
   passManager.addPass(IREE::Flow::createExpandTensorShapesPass());
-  buildGlobalOptimizationPassPipeline(passManager, transformOptions);
 
   // Transform pad operations into linalg.fill + tensor.insert_slice.
   // This is a WAR for not having native pad handling.
@@ -263,9 +262,15 @@ void buildFlowTransformPassPipeline(OpPassManager &passManager,
       .addPredicatedPass(clEnableDataLayoutPropagation,
                          createDataLayoutPropagationPass)
       .addPass(mlir::createCanonicalizerPass)
-      .addPass(mlir::createCSEPass)
+      .addPass(mlir::createCSEPass);
+  if (transformOptions.buildConstEvalPassPipeline) {
+    passManager.addPass(IREE::Flow::createConstEvalTensorOpsPass());
+  }
+  buildGlobalOptimizationPassPipeline(passManager, transformOptions);
+
       ////////////////////////////////////////////////////////////////////////
       // Dispatch region formation.
+  FunctionLikeNest(passManager)
       .addPredicatedPass(!clDispatchTransformFileName.empty(),
                          [&]() {
                            return createDispatchWithTransformDialect(

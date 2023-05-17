@@ -35,6 +35,7 @@ iree_cc_library(
     "CloneProducersIntoDispatchRegions.cpp"
     "CollapseDimensions.cpp"
     "CollapseReductionDims.cpp"
+    "ConstEvalTensorOps.cpp"
     "Convert1X1FilterConv2DToMatmul.cpp"
     "ConvertRegionToWorkgroups.cpp"
     "ConvertToFlow.cpp"

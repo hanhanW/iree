@@ -57,6 +57,13 @@ def DataLayoutPropagation :
   "mlir::iree_compiler::IREE::Flow::createDataLayoutPropagationPass()";
 }
 
+
+def ConstEvalTensorOps :
+    Pass<"iree-flow-const-eval-tensor-ops", "mlir::ModuleOp"> {
+  let summary = "TBD";
+  let constructor = "mlir::iree_compiler::IREE::Flow::createConstEvalTensorOpsPass()";
+}
+
 def DeduplicateExecutables :
     Pass<"iree-flow-deduplicate-executables", "mlir::ModuleOp"> {
   let summary = "Deduplicates executables that are identical";
