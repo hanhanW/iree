@@ -38,6 +38,7 @@ iree_cc_library(
     "Convert1X1FilterConv2DToMatmul.cpp"
     "ConvertRegionToWorkgroups.cpp"
     "ConvertToFlow.cpp"
+    "DataLayoutPropagation.cpp"
     "DeduplicateExecutables.cpp"
     "DetachElementwiseFromNamedOps.cpp"
     "DispatchWithTransformDialect.cpp"

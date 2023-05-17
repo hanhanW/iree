@@ -97,6 +97,10 @@ static llvm::cl::opt<bool> clDispatchGenerateWorkloadRegion(
     "iree-flow-dispatch-generate-workload-region",
     llvm::cl::desc("Generate the workload region"), llvm::cl::init(true));
 
+static llvm::cl::opt<bool> clEnableDataLayoutPropagation(
+    "iree-flow-enable-data-layout-propagation",
+    llvm::cl::desc("Enable data layout propagation"), llvm::cl::init(false));
+
 static llvm::cl::opt<bool> clEnableDataTiling(
     "iree-flow-enable-data-tiling", llvm::cl::desc("Enable data tiling path"),
     llvm::cl::init(false));
@@ -256,6 +260,10 @@ void buildFlowTransformPassPipeline(OpPassManager &passManager,
                          createInterchangeTransposeGenericOpsPass)
       // Enable data tiling after all linalg level transformations.
       .addPredicatedPass(clEnableDataTiling, createSetEncodingPass)
+      .addPredicatedPass(clEnableDataLayoutPropagation,
+                         createDataLayoutPropagationPass)
+      .addPass(mlir::createCanonicalizerPass)
+      .addPass(mlir::createCSEPass)
       ////////////////////////////////////////////////////////////////////////
       // Dispatch region formation.
       .addPredicatedPass(!clDispatchTransformFileName.empty(),

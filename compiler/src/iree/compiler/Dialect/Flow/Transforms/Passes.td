@@ -50,6 +50,13 @@ def ConvertToFlow :
   let constructor = "mlir::iree_compiler::IREE::Flow::createConvertToFlowPass()";
 }
 
+def DataLayoutPropagation :
+    InterfacePass<"iree-flow-data-layout-propagation", "mlir::FunctionOpInterface"> {
+  let summary = "Propagate relayout ops through linalg ops";
+  let constructor =
+  "mlir::iree_compiler::IREE::Flow::createDataLayoutPropagationPass()";
+}
+
 def DeduplicateExecutables :
     Pass<"iree-flow-deduplicate-executables", "mlir::ModuleOp"> {
   let summary = "Deduplicates executables that are identical";

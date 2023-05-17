@@ -95,6 +95,11 @@ std::unique_ptr<InterfacePass<mlir::FunctionOpInterface>>
 createFusionOfTensorOpsPass(bool fuseMultiUse = false,
                             unsigned multiUseFusionIteration = 2);
 
+// A pass to propagate relayout ops (like tensor.pack/unpack) through other
+// operations.
+std::unique_ptr<InterfacePass<mlir::FunctionOpInterface>>
+createDataLayoutPropagationPass();
+
 // Infers and inserts util.numeric.optional_narrow ops at points that may be
 // beneficial.
 std::unique_ptr<Pass> createInferNumericNarrowingPass();
