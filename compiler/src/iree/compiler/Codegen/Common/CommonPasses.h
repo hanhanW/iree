@@ -116,6 +116,20 @@ std::unique_ptr<OperationPass<>> createFoldTensorExtractOpPass();
 /// scf.for.
 std::unique_ptr<OperationPass<func::FuncOp>> createForOpCanonicalizationPass();
 
+struct GenericVectorizationPassOptions {
+  bool enableVectorMasking = false;
+  bool vectorizePadding = false;
+  bool vectorizeGatherAccesses = false;
+};
+std::unique_ptr<OperationPass<func::FuncOp>> createGenericVectorizationPass();
+std::unique_ptr<OperationPass<func::FuncOp>> createGenericVectorizationPass(
+    const GenericVectorizationPassOptions &options);
+
+std::unique_ptr<OperationPass<func::FuncOp>>
+createHoistRedundantVectorTransfersPass();
+std::unique_ptr<OperationPass<func::FuncOp>>
+createConvertExtractStridedSliceToTransferReadPass();
+
 /// Fuses tensor.pad ops into their consumer ops' tiled loop nests.
 std::unique_ptr<OperationPass<func::FuncOp>>
 createFuseTensorPadWithConsumerPass();

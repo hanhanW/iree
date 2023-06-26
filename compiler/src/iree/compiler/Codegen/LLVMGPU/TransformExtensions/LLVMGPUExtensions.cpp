@@ -1367,60 +1367,53 @@ static bool haveConflictingEffects(
   return false;
 }
 
-namespace {
 /// Barrier elimination pattern. If a barrier does not enforce any conflicting
 /// pair of memory effects, including a pair that is enforced by another
 /// barrier, it is unnecessary and can be removed. Adapted from
 /// "High-Performance GPU-to-CPU Transpilation and Optimization via High-Level
 /// Parallel Constructs" by Moses et.al. in PPoPP 2023 and implementation in
 /// Polygeist.
-class BarrierElimination final : public OpRewritePattern<gpu::BarrierOp> {
- public:
-  using OpRewritePattern<gpu::BarrierOp>::OpRewritePattern;
+LogicalResult mlir::iree_compiler::BarrierElimination::matchAndRewrite(
+    gpu::BarrierOp barrier, PatternRewriter &rewriter) const {
+  LLVM_DEBUG(DBGS() << "checking the necessity of: " << barrier << " "
+                    << barrier.getLoc() << "\n");
 
-  LogicalResult matchAndRewrite(gpu::BarrierOp barrier,
-                                PatternRewriter &rewriter) const override {
-    LLVM_DEBUG(DBGS() << "checking the necessity of: " << barrier << " "
-                      << barrier.getLoc() << "\n");
+  {
+    LLVM_DEBUG(DBGS() << "with respect to the barrier(s) before\n");
+    SmallVector<MemoryEffects::EffectInstance> beforeEffects;
+    getEffectsBefore(barrier, beforeEffects, /*stopAtBarrier=*/true);
 
-    {
-      LLVM_DEBUG(DBGS() << "with respect to the barrier(s) before\n");
-      SmallVector<MemoryEffects::EffectInstance> beforeEffects;
-      getEffectsBefore(barrier, beforeEffects, /*stopAtBarrier=*/true);
+    SmallVector<MemoryEffects::EffectInstance> afterEffects;
+    getEffectsAfter(barrier, afterEffects, /*stopAtBarrier=*/false);
 
-      SmallVector<MemoryEffects::EffectInstance> afterEffects;
-      getEffectsAfter(barrier, afterEffects, /*stopAtBarrier=*/false);
-
-      if (!haveConflictingEffects(beforeEffects, afterEffects)) {
-        LLVM_DEBUG(DBGS() << "the barrier(s) before is sufficient, removing "
-                          << barrier << "\n");
-        rewriter.eraseOp(barrier);
-        return success();
-      }
+    if (!haveConflictingEffects(beforeEffects, afterEffects)) {
+      LLVM_DEBUG(DBGS() << "the barrier(s) before is sufficient, removing "
+                        << barrier << "\n");
+      rewriter.eraseOp(barrier);
+      return success();
     }
-
-    {
-      LLVM_DEBUG(DBGS() << "with respect to the barrier(s) after\n");
-      SmallVector<MemoryEffects::EffectInstance> beforeEffects;
-      getEffectsBefore(barrier, beforeEffects, /*stopAtBarrier*/ false);
-
-      SmallVector<MemoryEffects::EffectInstance> afterEffects;
-      getEffectsAfter(barrier, afterEffects, /*stopAtBarrier*/ true);
-
-      if (!haveConflictingEffects(beforeEffects, afterEffects)) {
-        LLVM_DEBUG(DBGS() << "the barrier(s) after is sufficient, removing "
-                          << barrier << "\n");
-        rewriter.eraseOp(barrier);
-        return success();
-      }
-    }
-
-    LLVM_DEBUG(DBGS() << "barrier is necessary: " << barrier << " "
-                      << barrier.getLoc() << "\n");
-    return failure();
   }
-};
-}  // namespace
+
+  {
+    LLVM_DEBUG(DBGS() << "with respect to the barrier(s) after\n");
+    SmallVector<MemoryEffects::EffectInstance> beforeEffects;
+    getEffectsBefore(barrier, beforeEffects, /*stopAtBarrier*/ false);
+
+    SmallVector<MemoryEffects::EffectInstance> afterEffects;
+    getEffectsAfter(barrier, afterEffects, /*stopAtBarrier*/ true);
+
+    if (!haveConflictingEffects(beforeEffects, afterEffects)) {
+      LLVM_DEBUG(DBGS() << "the barrier(s) after is sufficient, removing "
+                        << barrier << "\n");
+      rewriter.eraseOp(barrier);
+      return success();
+    }
+  }
+
+  LLVM_DEBUG(DBGS() << "barrier is necessary: " << barrier << " "
+                    << barrier.getLoc() << "\n");
+  return failure();
+}
 
 void transform_dialect::EliminateGpuBarriersOp::build(OpBuilder &builder,
                                                       OperationState &state,

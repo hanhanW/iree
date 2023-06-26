@@ -142,6 +142,35 @@ def ExtractAddressComputation: Pass<"extract-address-computation"> {
   ];
 }
 
+def GenericVectorization :
+    Pass<"iree-codegen-generic-vectorization", "func::FuncOp"> {
+  let summary = "Pass to perform vectorization on tensor/linalg ops.";
+  let options = [
+    Option<"enableVectorMasking", "enable-vector-masking", "bool",/*default=*/"false",
+      "Enable vector masking during vectorization.">,
+    Option<"vectorizePadding", "vectorize-padding", "bool", /*default=*/"false",
+      "Rewrite all tensor.pad ops in the function to vector form.">,
+    Option<"vectorizeGatherAccesses", "vectorize-gather-accesses", "bool", /*default=*/"false",
+      "Enable vectorizaiton of operations that may generate vector.gather operations.">,
+  ];
+  let constructor =
+      "mlir::iree_compiler::createGenericVectorizationPass()";
+}
+
+def HoistRedundantVectorTransfers :
+    Pass<"iree-codegen-hoist-redundant-vector-transfers", "func::FuncOp"> {
+  let summary = "Pass to perform hoisting redundant vector transfers.";
+  let constructor =
+      "mlir::iree_compiler::createHoistRedundantVectorTransfersPass()";
+}
+
+def ConvertExtractStridedSliceToTransferRead :
+    Pass<"iree-codegen-convert-extract-strided-slice-to-transfer-read", "func::FuncOp"> {
+  let summary = "TBD.";
+  let constructor =
+      "mlir::iree_compiler::createConvertExtractStridedSliceToTransferReadPass()";
+}
+
 def ExtractAddressComputationGPU: Pass<"extract-address-computation-gpu"> {
   let summary = "Extract address computations from memory accesses";
   let description = [{
@@ -571,21 +600,6 @@ def LLVMCPUSplitReduction : Pass<"iree-llvmcpu-split-reduction", "func::FuncOp">
   ];
 }
 
-def LLVMCPUVectorization :
-    Pass<"iree-llvmcpu-vectorization", "func::FuncOp"> {
-  let summary = "Pass to perform vectorization on tensor/linalg ops.";
-  let options = [
-    Option<"enableVectorMasking", "enable-vector-masking", "bool",/*default=*/"false",
-      "Enable vector masking during vectorization.">,
-    Option<"vectorizePadding", "vectorize-padding", "bool", /*default=*/"false",
-      "Rewrite all tensor.pad ops in the function to vector form.">,
-    Option<"vectorizeGatherAccesses", "vectorize-gather-accesses", "bool", /*default=*/"false",
-      "Enable vectorizaiton of operations that may generate vector.gather operations.">,
-  ];
-  let constructor =
-      "mlir::iree_compiler::createLLVMCPUVectorizationPass()";
-}
-
 def LLVMCPUVectorLowering :
     Pass<"iree-llvmcpu-vector-lowering", "func::FuncOp"> {
   let summary = "Pass to lower Vector ops before conversion to LLVM.";
@@ -764,6 +778,12 @@ def LLVMGPUTensorPad :
     Pass<"iree-llvmgpu-tensor-pad", "func::FuncOp"> {
   let summary = "Pass to pad out tensors up to static dimensions.";
   let constructor = "mlir::iree_compiler::createLLVMGPUTensorPadPass()";
+}
+
+def LLVMGPUEliminateGpuBarriers :
+    Pass<"iree-llvmgpu-elilminate-gpu-barriers", "func::FuncOp"> {
+  let summary = "TBD";
+  let constructor = "mlir::iree_compiler::createLLVMGPUEliminateGpuBarriersPass()";
 }
 
 //------------------------------------------------------------------------------

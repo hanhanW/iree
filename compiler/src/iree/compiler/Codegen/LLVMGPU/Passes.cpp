@@ -333,6 +333,76 @@ void addGPUMatmulTensorCoreMmaSyncPassPipeline(OpPassManager &pm,
       createLLVMGPUPackSharedMemoryAlloc());
 }
 
+void addGPUMatmulTensorCoreMmaSyncOnTensorsPassPipeline(
+    OpPassManager &pm, unsigned pipelineDepth) {
+  tileAndDistributeToWorkgroup(pm);
+
+  auto &nestedModulePM = pm.nest<ModuleOp>();
+  // TODO(hanchung): Add promotion passes before second level distribution.
+  // nestedModulePM.addNestedPass<func::FuncOp>(createGPUTensorAlloc());
+  nestedModulePM.addNestedPass<func::FuncOp>(createGPUTensorTile(false));
+  nestedModulePM.addNestedPass<func::FuncOp>(createCanonicalizerPass());
+  nestedModulePM.addNestedPass<func::FuncOp>(createCSEPass());
+
+  // Linalg -> vector
+  nestedModulePM.addNestedPass<func::FuncOp>(createGenericVectorizationPass());
+
+  // tensor to memref
+  addBufferizePasses(nestedModulePM);
+
+  // distribute foreach threads
+  nestedModulePM.addNestedPass<func::FuncOp>(createGPUDistribute());
+  //nestedModulePM.addNestedPass<func::FuncOp>(
+      //createLLVMGPUEliminateGpuBarriersPass());
+
+  nestedModulePM.addNestedPass<func::FuncOp>(createMemrefCopyToLinalgPass());
+  nestedModulePM.addNestedPass<func::FuncOp>(
+      createGPUDistributeSharedMemoryCopy());
+  nestedModulePM.addPass(createCanonicalizerPass());
+  nestedModulePM.addPass(createCSEPass());
+
+
+  nestedModulePM.addNestedPass<func::FuncOp>(
+      memref::createFoldMemRefAliasOpsPass());
+  nestedModulePM.addPass(createCanonicalizerPass());
+  nestedModulePM.addPass(createCSEPass());
+
+  // Even though we vectorize before bufferization we are not able to hoist
+  // accumulator load/store out of the K loop until distribution. Therefore we
+  // still rely on buffer level transformations for transfer ops hoisting and
+  // store to load forwarding. This relies on shacky alias analysis and we need
+  // to move this to tensor level once we have better abstractions.
+  nestedModulePM.addNestedPass<func::FuncOp>(
+      createOptimizeVectorTransferPass());
+
+  // Vector -> MMA ops
+  nestedModulePM.addNestedPass<func::FuncOp>(
+      createLLVMGPUTensorCoreVectorizationPass(GPUTensorCoreType::MMA_SYNC));
+  nestedModulePM.addNestedPass<func::FuncOp>(
+      createHoistRedundantVectorTransfersPass());
+  nestedModulePM.addNestedPass<func::FuncOp>(
+      createConvertExtractStridedSliceToTransferReadPass());
+  nestedModulePM.addPass(createCanonicalizerPass());
+  nestedModulePM.addPass(createCSEPass());
+
+  nestedModulePM.addNestedPass<func::FuncOp>(
+      createLLVMGPUVectorToGPU(GPUTensorCoreType::MMA_SYNC));
+  nestedModulePM.addPass(createCanonicalizerPass());
+  nestedModulePM.addPass(createCSEPass());
+
+
+  // Hoist loop invariant code to avoid pipelining it.
+  nestedModulePM.addNestedPass<func::FuncOp>(
+      createLoopInvariantCodeMotionPass());
+  // Pipeline memory operations.
+  nestedModulePM.addNestedPass<func::FuncOp>(createGPUPipeliningPass(
+      /*epiloguePeeling=*/false, pipelineDepth,
+      PipeliningSchedulingStrategy::nvidiaTensorCore));
+  // Optimize shared memory usage.
+  nestedModulePM.addNestedPass<func::FuncOp>(
+      createLLVMGPUPackSharedMemoryAlloc());
+}
+
 void addGPUTransposePassPipeline(OpPassManager &pm) {
   tileAndDistributeToWorkgroup(pm);
   auto &nestedModulePM = pm.nest<ModuleOp>();

@@ -29,11 +29,24 @@ class VectorDialect;
 class WarpExecuteOnLane0Op;
 }  // namespace vector
 
+namespace gpu {
+class BarrierOp;
+}  // namespace gpu
+
 namespace iree_compiler {
 
 /// Registers Flow transformations that require IREE-specific information into
 /// the transform dialect.
 void registerTransformDialectLLVMGPUExtension(DialectRegistry &registry);
+
+
+class BarrierElimination final : public OpRewritePattern<mlir::gpu::BarrierOp> {
+ public:
+  using OpRewritePattern<mlir::gpu::BarrierOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(mlir::gpu::BarrierOp barrier,
+                                PatternRewriter &rewriter) const override;
+};
 
 namespace IREE {
 namespace transform_dialect {

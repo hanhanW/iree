@@ -41,7 +41,6 @@ iree_cc_library(
     "LLVMCPUTileAndFuse.cpp"
     "LLVMCPUUnfuseFMAOps.cpp"
     "LLVMCPUVectorLowering.cpp"
-    "LLVMCPUVectorization.cpp"
     "Passes.cpp"
     "TargetMLTransformInfo.cpp"
     "TileSizeSelection.cpp"

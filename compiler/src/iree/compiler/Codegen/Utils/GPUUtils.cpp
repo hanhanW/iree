@@ -691,6 +691,18 @@ std::optional<SmallVector<int64_t>> getMmaNativeVectorSize(Operation *op) {
     return mmaShape;
   }
 
+  if (OpTrait::hasElementwiseMappableTraits(op)) {
+    auto dstVecType = cast<VectorType>(op->getResult(0).getType());
+    SmallVector<int64_t> outputShape(dstVecType.getRank() - 2, 1);
+    outputShape.append({mmaShapeM, mmaShapeN});
+    LLVM_DEBUG({
+      llvm::interleaveComma(outputShape,
+                            DBGS() << "shape for vector.xfer_write: ");
+      llvm::dbgs() << "\n";
+    });
+    return outputShape;
+  }
+
   // Shape of warp-level vector write operation.
   if (auto writeOp = dyn_cast<vector::TransferWriteOp>(op)) {
     SmallVector<int64_t> outputShape(writeOp.getVectorType().getRank() - 2, 1);

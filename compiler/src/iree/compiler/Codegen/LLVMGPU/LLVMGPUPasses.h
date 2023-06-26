@@ -25,6 +25,9 @@ void addGPUMatmulSimtPassPipeline(OpPassManager &pm);
 void addGPUMatmulTensorCoreMmaSyncPassPipeline(OpPassManager &pm,
                                                unsigned pipelineDepth);
 
+void addGPUMatmulTensorCoreMmaSyncOnTensorsPassPipeline(OpPassManager &pm,
+                                                        unsigned pipelineDepth);
+
 /// Lowering using wmma Tensor Core operations.
 void addGPUMatmulTensorCorePassPipeline(OpPassManager &pm,
                                         unsigned pipelineDepth);
@@ -92,6 +95,9 @@ createLLVMGPUTensorCoreVectorizationPass(
 //. Pass to pad out tensors up to static dimensions.
 std::unique_ptr<OperationPass<func::FuncOp>> createLLVMGPUTensorPadPass();
 
+std::unique_ptr<OperationPass<func::FuncOp>>
+createLLVMGPUEliminateGpuBarriersPass();
+
 /// Perform tiling and distribution to threads.
 std::unique_ptr<OperationPass<func::FuncOp>> createLLVMGPUTileAndDistribute(
     bool distributeToWarp = false);
@@ -101,7 +107,7 @@ std::unique_ptr<OperationPass<func::FuncOp>> createLLVMGPUVectorLoweringPass();
 
 /// Converts vector ops to gpu dialect.
 std::unique_ptr<OperationPass<func::FuncOp>> createLLVMGPUVectorToGPU(
-    GPUTensorCoreType tensorCoreType = GPUTensorCoreType::WMMA);
+    GPUTensorCoreType tensorCoreType = GPUTensorCoreType::MMA_SYNC);
 
 /// Lowering calling vectorization patterns.
 LogicalResult verifyGPUMatmulPipeline(

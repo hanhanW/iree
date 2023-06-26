@@ -213,6 +213,12 @@ static LogicalResult tileParallelDims(func::FuncOp funcOp,
     SmallVector<OpFoldResult> numThreads(numLoops, rewriter.getIndexAttr(0));
     int64_t id = 0, threadDim = 0;
     SmallVector<Attribute> idDims;
+    auto getWarpMapping = [&](int64_t dim) {
+      return mlir::gpu::GPUWarpMappingAttr::get(
+          tilingOp->getContext(), dim == 0   ? mlir::gpu::Warps::DimX
+                                  : dim == 1 ? mlir::gpu::Warps::DimY
+                                             : mlir::gpu::Warps::DimZ);
+    };
     auto getThreadMapping = [&](int64_t dim) {
       return mlir::gpu::GPUThreadMappingAttr::get(
           tilingOp->getContext(), dim == 0   ? mlir::gpu::Threads::DimX
@@ -223,7 +229,11 @@ static LogicalResult tileParallelDims(func::FuncOp funcOp,
       int64_t num = elementPerWorkgroup[id++];
       if (num > 1) {
         numThreads[loop] = rewriter.getIndexAttr(num);
-        idDims.push_back(getThreadMapping(threadDim++));
+        if (distributeToWarp) {
+          idDims.push_back(getWarpMapping(threadDim++));
+        } else {
+          idDims.push_back(getThreadMapping(threadDim++));
+        }
       }
     }
     std::reverse(idDims.begin(), idDims.end());

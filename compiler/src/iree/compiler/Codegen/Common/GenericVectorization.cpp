@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/compiler/Codegen/LLVMCPU/LLVMCPUPasses.h"
+#include "iree/compiler/Codegen/Common/CommonPasses.h"
 #include "iree/compiler/Codegen/PassDetail.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Affine/LoopUtils.h"
@@ -21,7 +21,7 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
-#define DEBUG_TYPE "iree-llvmcpu-vectorization"
+#define DEBUG_TYPE "iree-generic-vectorization"
 #define VEC_DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 
 namespace mlir {
@@ -209,11 +209,11 @@ static SmallVector<int64_t> getVectorSizes(
   return vecSize;
 }
 
-class LLVMCPUVectorizationPass
-    : public LLVMCPUVectorizationBase<LLVMCPUVectorizationPass> {
+class GenericVectorizationPass
+    : public GenericVectorizationBase<GenericVectorizationPass> {
  public:
-  using LLVMCPUVectorizationBase::LLVMCPUVectorizationBase;
-  LLVMCPUVectorizationPass(const LLVMCPUVectorizationPassOptions &options) {
+  using GenericVectorizationBase::GenericVectorizationBase;
+  GenericVectorizationPass(const GenericVectorizationPassOptions &options) {
     this->enableVectorMasking.setValue(options.enableVectorMasking);
     this->vectorizePadding.setValue(options.vectorizePadding);
     this->vectorizeGatherAccesses.setValue(options.vectorizeGatherAccesses);
@@ -226,7 +226,7 @@ class LLVMCPUVectorizationPass
   void runOnOperation() override;
 };
 
-void LLVMCPUVectorizationPass::runOnOperation() {
+void GenericVectorizationPass::runOnOperation() {
   MLIRContext *context = &getContext();
   auto funcOp = getOperation();
   SmallVector<int64_t> canonicalVectorShape;
@@ -265,6 +265,7 @@ void LLVMCPUVectorizationPass::runOnOperation() {
   vector::populateVectorTransferPermutationMapLoweringPatterns(
       vectorizationPatterns);
   vector::populateVectorReductionToContractPatterns(vectorizationPatterns);
+  vector::populateFoldArithExtensionPatterns(vectorizationPatterns);
   vectorizationPatterns.add<linalg::LinalgCopyVTRForwardingPattern,
                             linalg::LinalgCopyVTWForwardingPattern>(
       funcOp.getContext(), /*benefit=*/2);
@@ -292,17 +293,17 @@ void LLVMCPUVectorizationPass::runOnOperation() {
     else if (auto forOp = dyn_cast<scf::ForOp>(op))
       (void)promoteIfSingleIteration(forOp);
   });
-  linalg::hoistRedundantVectorTransfers(funcOp);
-  linalg::hoistRedundantVectorTransfersOnTensor(funcOp);
+  //linalg::hoistRedundantVectorTransfers(funcOp);
+  //linalg::hoistRedundantVectorTransfersOnTensor(funcOp);
 }
 }  // namespace
 
-std::unique_ptr<OperationPass<func::FuncOp>> createLLVMCPUVectorizationPass() {
-  return std::make_unique<LLVMCPUVectorizationPass>();
+std::unique_ptr<OperationPass<func::FuncOp>> createGenericVectorizationPass() {
+  return std::make_unique<GenericVectorizationPass>();
 }
-std::unique_ptr<OperationPass<func::FuncOp>> createLLVMCPUVectorizationPass(
-    const LLVMCPUVectorizationPassOptions &options) {
-  return std::make_unique<LLVMCPUVectorizationPass>(options);
+std::unique_ptr<OperationPass<func::FuncOp>> createGenericVectorizationPass(
+    const GenericVectorizationPassOptions &options) {
+  return std::make_unique<GenericVectorizationPass>(options);
 }
 }  // namespace iree_compiler
 }  // namespace mlir

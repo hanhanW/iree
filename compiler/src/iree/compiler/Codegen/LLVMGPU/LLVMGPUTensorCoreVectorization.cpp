@@ -141,6 +141,7 @@ struct LLVMGPUTensorCoreVectorizationPass
         funcOp->dump();
       });
 
+#if 1
       bool useMmaSyncShape = tensorCoreType == GPUTensorCoreType::MMA_SYNC;
       // Step 4. Break and unroll warp tile size to native math and load sizes.
       RewritePatternSet vectorUnrollPatterns(context);
@@ -153,6 +154,7 @@ struct LLVMGPUTensorCoreVectorizationPass
         llvm::dbgs() << "\nAfter populateVectorUnrollPattern:\n";
         funcOp->dump();
       });
+#endif
     }
   }
 
