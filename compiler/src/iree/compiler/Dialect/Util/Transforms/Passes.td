@@ -93,6 +93,13 @@ def HoistIntoGlobals : Pass<"iree-util-hoist-into-globals", "mlir::ModuleOp"> {
   }];
 }
 
+def SetOriginalTargetOnGlobals : Pass<"iree-util-set-original-target-on-globals", "mlir::ModuleOp"> {
+  let summary = "Sets original target on globals for jit-eval.";
+  let constructor = [{
+    mlir::iree_compiler::IREE::Util::createSetOriginalTargetOnGlobalsPass()
+  }];
+}
+
 def SimplifyGlobalAccesses :
     InterfacePass<"iree-util-simplify-global-accesses", "mlir::CallableOpInterface"> {
   let summary = "Hoists loads and sinks stores to variables to decrease data dependency regions.";

@@ -192,6 +192,12 @@ public:
       return failure();
     }
 
+    if (auto encodingTarget =
+            initOp->getAttr("iree.compiler.consteval.encoding.target")) {
+      targetModuleOp->setAttr("iree.compiler.consteval.encoding.target",
+                              encodingTarget);
+    }
+
     OpBuilder moduleBuilder = OpBuilder::atBlockEnd(targetModuleOp.getBody());
     auto funcOp = moduleBuilder.create<func::FuncOp>(
         initOp.getLoc(), "jit_eval", moduleBuilder.getFunctionType({}, {}));

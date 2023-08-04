@@ -135,6 +135,8 @@ std::optional<int32_t> getElementTypeValue(Type type) {
 }
 
 std::optional<int32_t> getEncodingTypeValue(Attribute attr) {
+  if (attr)
+    return 0;
   // TODO(#6762): encoding attribute handling/mapping to enums.
   assert(!attr && "encoding types other than default not yet supported");
   // Default to IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR for now.
@@ -578,6 +580,27 @@ ExecutableTargetAttr ExecutableTargetAttr::lookup(Operation *op) {
   }
   // No target found during walk. No default to provide so fail and let the
   // caller decide what to do (assert/fallback/etc).
+  return nullptr;
+}
+
+ExecutableTargetAttr ExecutableTargetAttr::lookupEncodingTarget(Operation *op) {
+  auto *context = op->getContext();
+  auto attrId = StringAttr::get(context, "hal.executable.target");
+  while (op) {
+    // Take directly from the enclosing variant.
+    if (auto variantOp = llvm::dyn_cast<ExecutableVariantOp>(op)) {
+      auto encodingTarget = variantOp.getEncodingTargetAttr();
+      if (encodingTarget)
+        return encodingTarget;
+      return variantOp.getTarget();
+    }
+    // Use an override if specified.
+    auto attr = op->getAttrOfType<ExecutableTargetAttr>(attrId);
+    if (attr)
+      return attr;
+    // Continue walk.
+    op = op->getParentOp();
+  }
   return nullptr;
 }
 

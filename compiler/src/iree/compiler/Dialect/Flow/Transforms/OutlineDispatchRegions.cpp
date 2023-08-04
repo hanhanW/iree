@@ -295,6 +295,11 @@ static ExecutableOp createExecutable(Location loc, StringRef executableName,
   auto executableOp =
       parentModuleBuilder.create<IREE::Flow::ExecutableOp>(loc, executableName);
 
+  if (auto attr =
+          parentModuleOp->getAttr("iree.compiler.consteval.encoding.target")) {
+    executableOp->setAttr("iree.compiler.consteval.encoding.target", attr);
+  }
+
   // Create the inner ModuleOp that contains the original functions. We need
   // to provide this shim as some ops (like std.call) look for the
   // containing module to provide symbol resolution.

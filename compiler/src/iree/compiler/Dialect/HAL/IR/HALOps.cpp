@@ -930,6 +930,19 @@ void ExecutableVariantOp::build(OpBuilder &builder, OperationState &state,
   state.addAttribute("target", target);
 }
 
+void ExecutableVariantOp::build(
+    OpBuilder &builder, OperationState &state, StringRef symName,
+    IREE::HAL::ExecutableTargetAttr target,
+    IREE::HAL::ExecutableTargetAttr encodingTarget) {
+  ensureTerminator(*state.addRegion(), builder, state.location);
+  state.addAttribute(mlir::SymbolTable::getSymbolAttrName(),
+                     builder.getStringAttr(symName));
+  state.addAttribute("target", target);
+  if (encodingTarget) {
+    state.addAttribute("encoding_target", encodingTarget);
+  }
+}
+
 DenseMap<Attribute, int> ExecutableVariantOp::gatherConstantOrdinals() {
   DenseMap<Attribute, int> map;
   for (auto blockOp : getOps<IREE::HAL::ExecutableConstantBlockOp>()) {

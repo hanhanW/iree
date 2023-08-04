@@ -175,6 +175,7 @@ void buildGlobalOptimizationPassPipeline(
   }
 
   if (transformOptions.buildConstEvalPassPipeline) {
+    pipeline.addPass(IREE::Util::createSetOriginalTargetOnGlobalsPass());
     transformOptions.buildConstEvalPassPipeline(pipeline);
   }
 
@@ -234,6 +235,9 @@ void buildFlowTransformPassPipeline(OpPassManager &passManager,
   // The more we are able to equate shape dimensions at this level the better
   // our fusions will be.
   passManager.addPass(IREE::Flow::createExpandTensorShapesPass());
+  FunctionLikeNest(passManager).addPredicatedPass(clEnableDataTiling, []() {
+    return createSetEncodingPass(clDataTilingAssumeTileSizesDivisorsOf);
+  });
   buildGlobalOptimizationPassPipeline(passManager, transformOptions);
 
   // Transform pad operations into linalg.fill + tensor.insert_slice.
@@ -272,12 +276,6 @@ void buildFlowTransformPassPipeline(OpPassManager &passManager,
       // transpose.
       .addPredicatedPass(clNormalizeInputIndexingMap,
                          createInterchangeTransposeGenericOpsPass)
-      // Enable data tiling after all linalg level transformations.
-      .addPredicatedPass(clEnableDataTiling,
-                         []() {
-                           return createSetEncodingPass(
-                               clDataTilingAssumeTileSizesDivisorsOf);
-                         })
       ////////////////////////////////////////////////////////////////////////
       // Dispatch region formation.
       .addPredicatedPass(!clDispatchTransformFileName.empty(),

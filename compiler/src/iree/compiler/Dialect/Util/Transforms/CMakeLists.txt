@@ -32,6 +32,7 @@ iree_cc_library(
     "Passes.cpp"
     "Patterns.cpp"
     "PropagateSubranges.cpp"
+    "SetOriginalTargetOnGlobals.cpp"
     "SimplifyGlobalAccesses.cpp"
     "StripDebugOps.cpp"
     "TestConversion.cpp"

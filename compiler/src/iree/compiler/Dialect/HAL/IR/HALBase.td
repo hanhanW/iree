@@ -784,6 +784,8 @@ def HAL_ExecutableTargetAttr :
     // `hal.executable.target` attribute is found or a `hal.executable.variant`
     // specifies a value. Returns nullptr if no target specification can be found.
     static ExecutableTargetAttr lookup(Operation *op);
+
+    static ExecutableTargetAttr lookupEncodingTarget(Operation *op);
   }];
 
   let hasCustomAssemblyFormat = 1;

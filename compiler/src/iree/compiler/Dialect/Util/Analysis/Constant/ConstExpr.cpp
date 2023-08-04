@@ -6,11 +6,12 @@
 
 #include "iree/compiler/Dialect/Util/Analysis/Constant/ConstExpr.h"
 
+#include "iree-dialects/Dialect/LinalgExt/IR/LinalgExtOps.h"
 #include "iree/compiler/Dialect/Util/Analysis/Constant/OpOracle.h"
 #include "iree/compiler/Dialect/Util/Analysis/Explorer.h"
 #include "iree/compiler/Dialect/Util/IR/UtilOps.h"
-#include "llvm/Support/Debug.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "llvm/Support/Debug.h"
 
 #define DEBUG_TYPE "iree-const-expr-analysis"
 
@@ -314,13 +315,19 @@ void ConstExprHoistingPolicy::makeInvariantDecision(
   if (!isHoistableConstExprLeaf(info)) {
     return decision->disableHoist();
   }
+
+  if (auto setEncoding =
+          dyn_cast<IREE::LinalgExt::SetEncodingOp>(info->getOperation())) {
+    if (!setEncoding.getSource().getDefiningOp<arith::ConstantOp>())
+      return decision->disableHoist();
+  }
 }
 
 void ConstExprHoistingPolicy::makeDecision(
     const ConstExprAnalysis::ConstValueInfo *info, Decision *decision) {
   // A const-expr value has a legal escape if:
   //   - Has a non analyzed consumer
-  //   - It has an anlyzed consumer that:
+  //   - It has an analyzed consumer that:
   //     - Has been marked as DISABLE_HOIST (must feed into something that is
   //       not being hoisted).
   //     - Is consumed by a hoistable operand or no operand (signals implicit

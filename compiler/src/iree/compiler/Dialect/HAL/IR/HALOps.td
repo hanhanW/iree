@@ -1879,6 +1879,7 @@ def HAL_ExecutableVariantOp : HAL_Op<"executable.variant", [
     OptionalAttr<StrAttr>:$sym_visibility,
     SymbolNameAttr:$sym_name,
     HAL_ExecutableTargetAttr:$target,
+    OptionalAttr<HAL_ExecutableTargetAttr>:$encoding_target,
     OptionalAttr<HAL_ExecutableObjectArrayAttr>:$objects
   );
 
@@ -1888,6 +1889,7 @@ def HAL_ExecutableVariantOp : HAL_Op<"executable.variant", [
     custom<SymbolVisibility>($sym_visibility)
     $sym_name
     `,` `target` `=` $target
+    (`,` `encoding_target` `=` $encoding_target^ )?
     (`,` `objects` `=` $objects^ )?
     attr-dict-with-keyword
     regions
@@ -1896,6 +1898,8 @@ def HAL_ExecutableVariantOp : HAL_Op<"executable.variant", [
   let skipDefaultBuilders = 1;
   let builders = [
     OpBuilder<(ins "StringRef":$name, "IREE::HAL::ExecutableTargetAttr":$target)>,
+    OpBuilder<(ins "StringRef":$name, "IREE::HAL::ExecutableTargetAttr":$target,
+                   "IREE::HAL::ExecutableTargetAttr":$encoding_target)>,
   ];
 
   let extraClassDeclaration = [{

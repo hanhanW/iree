@@ -6,12 +6,13 @@
 
 #include "iree/compiler/Dialect/Util/Analysis/Constant/OpOracle.h"
 
+#include "iree-dialects/Dialect/LinalgExt/IR/LinalgExtOps.h"
 #include "iree/compiler/Dialect/Util/IR/UtilDialect.h"
-#include "llvm/ADT/SmallPtrSet.h"
-#include "llvm/Support/Debug.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/Support/Debug.h"
 
 namespace mlir {
 namespace iree_compiler {
@@ -85,6 +86,11 @@ ConstExprOpInfo ConstExprOpInfo::getForOp(Operation *op) {
       return getInfoForDefaultConstExprOp(op);
     }
 
+    return {};
+  }
+
+  // Explicitly mark UpperBoundTileSizeOp not const-expr.
+  if (isa<IREE::LinalgExt::UpperBoundTileSizeOp>(op)) {
     return {};
   }
 
@@ -171,6 +177,14 @@ bool isHoistableConstExprLeaf(const ConstExprAnalysis::ConstValueInfo *info) {
     return false;
   }
 
+  if (auto padOp = dyn_cast<tensor::PadOp>(op)) {
+    return padOp.getResultType().hasStaticShape();
+  }
+
+  if (isa<IREE::LinalgExt::UpperBoundTileSizeOp>(op)) {
+    return false;
+  }
+
   return true;
 }
 
@@ -179,6 +193,10 @@ bool isHoistableConstExprConsumingOperand(OpOperand *operand) {
   // For linalg ops, we only want to hoist inputs.
   if (auto structuredOp = dyn_cast<linalg::LinalgOp>(op)) {
     return operand->getOperandNumber() < structuredOp.getNumDpsInputs();
+  }
+
+  if (isa<IREE::LinalgExt::UpperBoundTileSizeOp>(op)) {
+    return false;
   }
 
   // Fallback to yes.

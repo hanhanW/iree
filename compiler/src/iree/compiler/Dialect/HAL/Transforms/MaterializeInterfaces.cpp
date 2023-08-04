@@ -70,6 +70,7 @@ SymbolRefAttr makeExportSymbolRefAttr(IREE::HAL::ExecutableOp executableOp,
 static LogicalResult materializeExecutableFromSourceOp(
     IREE::HAL::ExecutableSourceOp sourceOp,
     ArrayRef<IREE::HAL::ExecutableTargetAttr> targetAttrs,
+    IREE::HAL::ExecutableTargetAttr encodingTargetAttr,
     EntryPointExpansions &entryPointExpansions) {
   OpBuilder moduleBuilder(sourceOp);
 
@@ -89,7 +90,8 @@ static LogicalResult materializeExecutableFromSourceOp(
   for (auto targetAttr : targetAttrs) {
     // Create new variant and clone the exports.
     auto targetVariantOp = targetBuilder.create<IREE::HAL::ExecutableVariantOp>(
-        sourceOp->getLoc(), targetAttr.getSymbolNameFragment(), targetAttr);
+        sourceOp->getLoc(), targetAttr.getSymbolNameFragment(), targetAttr,
+        encodingTargetAttr);
     targetSymbolTable.insert(targetVariantOp);
     OpBuilder variantBuilder(&targetVariantOp.getBlock().back());
     for (auto sourceEntryPointOp : sourceEntryPointOps) {
@@ -137,9 +139,16 @@ static LogicalResult materializeExecutablesFromSourceOps(
       return sourceOp.emitError()
              << "no executable targets specified for translation";
     }
+    auto deviceTargetAttr =
+        moduleOp->getAttrOfType<IREE::HAL::DeviceTargetAttr>(
+            "iree.compiler.consteval.encoding.target");
+    IREE::HAL::ExecutableTargetAttr encodingTargetAttr;
+    if (deviceTargetAttr) {
+      encodingTargetAttr = deviceTargetAttr.getExecutableTargets()[0];
+    }
 
-    if (failed(materializeExecutableFromSourceOp(sourceOp, targetAttrs,
-                                                 entryPointExpansions))) {
+    if (failed(materializeExecutableFromSourceOp(
+            sourceOp, targetAttrs, encodingTargetAttr, entryPointExpansions))) {
       return failure();
     }
   }
@@ -356,6 +365,7 @@ declareEntryPointOps(IREE::Stream::ExecutableOp sourceExecutableOp,
           break;
         }
       }
+
       auto newExportOp = targetBuilder.create<IREE::HAL::ExecutableExportOp>(
           exportOp.getLoc(),
           targetBuilder.getStringAttr(exportOp.getFunctionRef()),
@@ -531,6 +541,14 @@ public:
       if (exportOps.empty())
         continue;
 
+      auto deviceTargetAttr =
+          sourceOp->getAttrOfType<IREE::HAL::DeviceTargetAttr>(
+              "iree.compiler.consteval.encoding.target");
+      IREE::HAL::ExecutableTargetAttr encodingTargetAttr;
+      if (deviceTargetAttr) {
+        encodingTargetAttr = deviceTargetAttr.getExecutableTargets()[0];
+      }
+
       // Gather a list of all #hal.executable.targets that we should produce
       // variants for.
       auto targetAttrs =
@@ -556,7 +574,7 @@ public:
         auto targetContainerOp =
             targetBuilder.create<IREE::HAL::ExecutableVariantOp>(
                 sourceOp->getLoc(), targetAttr.getSymbolNameFragment(),
-                targetAttr);
+                targetAttr, encodingTargetAttr);
         setApplicableObjects(sourceOp, targetContainerOp);
         targetSymbolTable.insert(targetContainerOp);
         OpBuilder containerBuilder(&targetContainerOp.getBlock().back());
