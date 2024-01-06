@@ -16,11 +16,6 @@ static llvm::cl::opt<int> clMaxAllocationSizeInBytes(
     "iree-llvmcpu-stack-allocation-limit",
     llvm::cl::desc("maximum allowed stack allocation size in bytes"),
     llvm::cl::init(32768));
-static llvm::cl::opt<bool> clFailOnOutOfBoundsStackAllocation(
-    "iree-llvmcpu-fail-on-out-of-bounds-stack-allocation",
-    llvm::cl::desc("fail if the upper bound of dynamic stack allocation cannot "
-                   "be solved"),
-    llvm::cl::init(true));
 
 namespace {
 struct LLVMCPUCheckIRBeforeLLVMConversionPass
@@ -87,8 +82,7 @@ void LLVMCPUCheckIRBeforeLLVMConversionPass::runOnOperation() {
   auto moduleOp = getOperation();
 
   for (auto funcOp : moduleOp.getOps<func::FuncOp>()) {
-    if (clFailOnOutOfBoundsStackAllocation &&
-        failed(checkStackAllocationSize(funcOp))) {
+    if (failed(checkStackAllocationSize(funcOp))) {
       return signalPassFailure();
     }
   }
