@@ -35,6 +35,52 @@ static bool has16x16Transpose(func::FuncOp funcOp) {
   return res;
 }
 
+class PackTransposeLastDim
+    : public OpRewritePattern<vector::TransposeOp> {
+public:
+  using OpRewritePattern<vector::TransposeOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(vector::TransposeOp op,
+                                PatternRewriter &rewriter) const override {
+    ArrayRef<int64_t> perm = op.getPermutation();
+    if (perm.back() + 1 != perm.size()) {
+      return rewriter.notifyMatchFailure(
+          op, "expect the last dim is not transposed");
+    }
+    VectorType srcType = op.getSourceVectorType();
+    if (srcType.getShape().back() == 1) {
+      return rewriter.notifyMatchFailure(
+          op, "expect there are more than 1 elements in the last dimension");
+    }
+
+    Type elemType = srcType.getElementType();
+    int64_t newElemBitwidth =
+        elemType.getIntOrFloatBitWidth() * srcType.getShape().back();
+    if (newElemBitwidth > 32) {
+      return rewriter.notifyMatchFailure(
+          op, "do not pack because the new bitwidth will be greater than 32");
+    }
+
+    Type newElemType = rewriter.getIntegerType(newElemBitwidth);
+    SmallVector<int64_t> newSrcShape(srcType.getShape());
+    newSrcShape.back() = 1;
+    auto newSrcType = VectorType::get(newSrcShape, newElemType);
+
+    VectorType resType = op.getResultVectorType();
+    SmallVector<int64_t> newResShape(resType.getShape());
+    newResShape.back() = 1;
+    auto newResType = VectorType::get(newResShape, newElemType);
+
+    Location loc = op.getLoc();
+    auto srcBitCast =
+        rewriter.create<vector::BitCastOp>(loc, newSrcType, op.getVector());
+    auto transpose =
+        rewriter.create<vector::TransposeOp>(loc, newResType, srcBitCast, perm);
+    rewriter.replaceOpWithNewOp<vector::BitCastOp>(op, resType, transpose);
+    return success();
+  }
+};
+
 class LLVMCPUVectorTransposeLoweringPass
     : public LLVMCPUVectorTransposeLoweringBase<
           LLVMCPUVectorTransposeLoweringPass> {
@@ -53,6 +99,11 @@ public:
 void LLVMCPUVectorTransposeLoweringPass::runOnOperation() {
   MLIRContext *ctx = &getContext();
   auto funcOp = getOperation();
+  {
+    RewritePatternSet patterns(ctx);
+    patterns.insert<PackTransposeLastDim>(ctx);
+    (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
+  }
 
   auto vectorTransformOptions =
       vector::VectorTransformsOptions().setVectorTransposeLowering(
