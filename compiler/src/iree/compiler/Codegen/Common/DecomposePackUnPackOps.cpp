@@ -264,7 +264,7 @@ void DecomposePackUnPackOpsPass::runOnOperation() {
   // Fold trailing unit dims away for linalg.transpose ops.
   {
     RewritePatternSet patterns(ctx);
-    patterns.add<FoldTrailingUnitTranspose>(ctx);
+    //patterns.add<FoldTrailingUnitTranspose>(ctx);
     if (failed(applyPatternsAndFoldGreedily(funcOp, std::move(patterns)))) {
       return signalPassFailure();
     }

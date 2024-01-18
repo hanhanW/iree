@@ -99,12 +99,6 @@ public:
 void LLVMCPUVectorTransposeLoweringPass::runOnOperation() {
   MLIRContext *ctx = &getContext();
   auto funcOp = getOperation();
-  {
-    RewritePatternSet patterns(ctx);
-    patterns.insert<PackTransposeLastDim>(ctx);
-    (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
-  }
-
   auto vectorTransformOptions =
       vector::VectorTransformsOptions().setVectorTransposeLowering(
           vector::VectorTransposeLowering::Shuffle1D);

@@ -1311,6 +1311,18 @@ static bool isPackMatmulLHS(tensor::PackOp op) {
          op.getInnerDimsPos()[0] == 0 && op.getInnerDimsPos()[1] == 1;
 }
 
+static bool isDoablePack(tensor::PackOp op) {
+  SmallVector<int64_t> innerTiles = op.getStaticTiles();
+  if (llvm::any_of(innerTiles, ShapedType::isDynamic))
+    return false;
+  if (innerTiles.size() != 2)
+    return false;
+  return innerTiles[0] == 16 &&
+         innerTiles[1] *
+                 getElementTypeOrSelf(op.getType()).getIntOrFloatBitWidth() <=
+             32;
+}
+
 /// Returns vectorization tile sizes for a pack op. It is driven by pack op
 /// configurations and target CPU features.
 static SmallVector<int64_t> getPackVectorTileSizes(func::FuncOp entryPointFn,
@@ -1318,10 +1330,9 @@ static SmallVector<int64_t> getPackVectorTileSizes(func::FuncOp entryPointFn,
   SmallVector<int64_t> tileSizes(op.getSourceRank(), 1);
   auto targetAttr = IREE::HAL::ExecutableTargetAttr::lookup(entryPointFn);
   int64_t vectorSize = getVectorSize(entryPointFn, op.getSourceType());
-  // TODO(#15421): Improve tile sizes selection for non f32 cases.
-  if (op.getSourceType().getElementType().isF32() &&
-      hasAVX512fFeature(targetAttr) && isPackMatmulLHS(op)) {
-    tileSizes.back() = vectorSize;
+  if (isDoablePack(op) && hasAVX512fFeature(targetAttr)) {
+    (void)vectorSize;
+    tileSizes.back() = 16;
   }
   return tileSizes;
 }

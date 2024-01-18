@@ -288,10 +288,11 @@ void buildLLVMCPUVectorLoweringPipeline(
   passManager.addNestedPass<func::FuncOp>(createCanonicalizerPass());
 
   passManager.addNestedPass<func::FuncOp>(
-      createLLVMCPUVectorTransferLoweringPass());
-  passManager.addNestedPass<func::FuncOp>(
       createLLVMCPUVectorTransposeLoweringPass(
           options.lowerVectorTransposeToAVX2));
+
+  passManager.addNestedPass<func::FuncOp>(
+      createLLVMCPUVectorTransferLoweringPass());
 
   // 'vector.shape_cast' are very expensive operations that are even generated
   // by some of the lowerings above (e.g., transpose lowering). There are
@@ -564,9 +565,11 @@ void addCPUDataTilingPipeline(OpPassManager &passManager,
   addCPUBufferizePasses(nestedModulePM);
 
   {
+#if 0
     // Fold unit dims before vector lowering.
     nestedModulePM.addNestedPass<func::FuncOp>(
         createOptimizeVectorTransferPass(/*flatten=*/false));
+#endif
     LLVMCPUVectorLoweringPassOptions options;
     options.splitVectorTransfersTo = "linalg-copy";
     buildLLVMCPUVectorLoweringPipeline(nestedModulePM, options);
