@@ -22,7 +22,7 @@ iree_tablegen_library(
 
 iree_tablegen_library(
   NAME
-    LinalgExtInterfacesGen
+    LinalgExtInterfacesIncGen
   TD_FILE
     "LinalgExtInterfaces.td"
   OUTS
@@ -32,7 +32,7 @@ iree_tablegen_library(
 
 iree_tablegen_library(
   NAME
-    LinalgExtOpsGen
+    LinalgExtOpsIncGen
   TD_FILE
     "LinalgExtOps.td"
   OUTS
@@ -74,10 +74,8 @@ iree_cc_library(
     "LinalgExtOps.cpp.inc"
     "LinalgExtTypes.cpp.inc"
   DEPS
-    ::IREELinalgExtIncGen
-    ::IREELinalgExtInterfacesIncGen
-    ::IREELinalgExtPassIncGen
-    ::IREELinalgExtUtils
+    ::LinalgExtInterfacesIncGen
+    ::LinalgExtOpsIncGen
     LLVMSupport
     MLIRAffineDialect
     MLIRAffineUtils
