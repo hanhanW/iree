@@ -7,8 +7,8 @@
 #ifndef IREE_DIALECT_LINALGEXT_OPS
 #define IREE_DIALECT_LINALGEXT_OPS
 
-include "iree-dialects/Dialect/LinalgExt/IR/LinalgExtBase.td"
-include "iree-dialects/Dialect/LinalgExt/IR/LinalgExtInterfaces.td"
+include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtBase.td"
+include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtInterfaces.td"
 include "mlir/Interfaces/ControlFlowInterfaces.td"
 include "mlir/Interfaces/DestinationStyleOpInterface.td"
 include "mlir/Interfaces/InferTypeOpInterface.td"
@@ -20,12 +20,12 @@ include "mlir/Interfaces/ViewLikeInterface.td"
 // Base class.
 //===----------------------------------------------------------------------===//
 
-class IREELinalgExt_PureOp<string mnemonic, list<Trait> traits = []> :
-    Op<IREELinalgExt_Dialect, mnemonic, traits> {
+class LinalgExt_PureOp<string mnemonic, list<Trait> traits = []> :
+    Op<LinalgExt_Dialect, mnemonic, traits> {
 }
 
-class IREELinalgExt_Op<string mnemonic, list<Trait> traits = []> :
-    IREELinalgExt_PureOp<mnemonic, !listconcat(traits,
+class LinalgExt_Op<string mnemonic, list<Trait> traits = []> :
+    LinalgExt_PureOp<mnemonic, !listconcat(traits,
         [AttrSizedOperandSegments,
          DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
          DestinationStyleOpInterface, LinalgExtInterface,
@@ -47,7 +47,7 @@ def OpGroupUtilityOps : OpDocGroup {
 
 let opDocGroup = OpGroupUtilityOps in {
 
-def IREELinalgExt_YieldOp : IREELinalgExt_PureOp<"yield", [Pure, ReturnLike, Terminator]> {
+def LinalgExt_YieldOp : LinalgExt_PureOp<"yield", [Pure, ReturnLike, Terminator]> {
   let summary = "LinalgExt yield op";
   let description = [{
     `iree_linalg_ext.yield` is a special terminator operation for blocks inside
@@ -76,7 +76,7 @@ def OpGroupNonStructuredOps : OpDocGroup {
 
 let opDocGroup = OpGroupNonStructuredOps in {
 
-def IREELinalgExt_ScatterOp : IREELinalgExt_Op<"scatter",
+def LinalgExt_ScatterOp : LinalgExt_Op<"scatter",
     [DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface>,
      DeclareOpInterfaceMethods<TilingInterface,
         ["generateScalarImplementation",
@@ -188,7 +188,7 @@ def IREELinalgExt_ScatterOp : IREELinalgExt_Op<"scatter",
   }];
 }
 
-def IREELinalgExt_SortOp : IREELinalgExt_Op<"sort",
+def LinalgExt_SortOp : LinalgExt_Op<"sort",
     [DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface>,
      DeclareOpInterfaceMethods<TilingInterface,
         ["generateScalarImplementation",
@@ -239,7 +239,7 @@ def IREELinalgExt_SortOp : IREELinalgExt_Op<"sort",
   }];
 }
 
-def IREELinalgExt_FftOp : IREELinalgExt_Op<"fft", [
+def LinalgExt_FftOp : LinalgExt_Op<"fft", [
   DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface>,
   DeclareOpInterfaceMethods<TilingInterface,
       ["generateScalarImplementation",
@@ -309,7 +309,7 @@ def IREELinalgExt_FftOp : IREELinalgExt_Op<"fft", [
   }];
 }
 
-def IREELinalgExt_ScanOp : IREELinalgExt_Op<"scan",
+def LinalgExt_ScanOp : LinalgExt_Op<"scan",
     [DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface>,
      DeclareOpInterfaceMethods<TilingInterface,
       ["generateScalarImplementation",
@@ -370,7 +370,7 @@ def IREELinalgExt_ScanOp : IREELinalgExt_Op<"scan",
   }];
 }
 
-def IREELinalgExt_ReverseOp : IREELinalgExt_Op<"reverse", [
+def LinalgExt_ReverseOp : LinalgExt_Op<"reverse", [
   DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface>,
   DeclareOpInterfaceMethods<
       TilingInterface,
@@ -430,7 +430,7 @@ def IREELinalgExt_ReverseOp : IREELinalgExt_Op<"reverse", [
   }];
 }
 
-def IREELinalgExt_TopkOp : IREELinalgExt_Op<"topk",[
+def LinalgExt_TopkOp : LinalgExt_Op<"topk",[
   DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface>,
   DeclareOpInterfaceMethods<LinalgExtInterface>,
   DeclareOpInterfaceMethods<TilingInterface,
@@ -511,7 +511,7 @@ def IREELinalgExt_TopkOp : IREELinalgExt_Op<"topk",[
 // Attention
 //===----------------------------------------------------------------------===//
 
-def IREELinalgExt_AttentionOp : IREELinalgExt_Op<"attention",
+def LinalgExt_AttentionOp : LinalgExt_Op<"attention",
     [DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface>,
      DeclareOpInterfaceMethods<TilingInterface,
       ["getIterationDomain",
@@ -645,7 +645,7 @@ def OpGroupDataTilingOps : OpDocGroup {
 
 let opDocGroup = OpGroupDataTilingOps in {
 
-def IREELinalgExt_PackOp : IREELinalgExt_Op<"pack", [
+def LinalgExt_PackOp : LinalgExt_Op<"pack", [
   DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface>,
   DeclareOpInterfaceMethods<LinalgExtInterface>,
   DeclareOpInterfaceMethods<TilingInterface,
@@ -808,7 +808,7 @@ def IREELinalgExt_PackOp : IREELinalgExt_Op<"pack", [
   }];
 }
 
-def IREELinalgExt_UnPackOp : IREELinalgExt_Op<"unpack", [
+def LinalgExt_UnPackOp : LinalgExt_Op<"unpack", [
   DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface>,
   DeclareOpInterfaceMethods<LinalgExtInterface>,
   DeclareOpInterfaceMethods<TilingInterface,
@@ -929,7 +929,7 @@ def IREELinalgExt_UnPackOp : IREELinalgExt_Op<"unpack", [
   }];
 }
 
-def IREELinalgExt_SetEncodingOp : IREELinalgExt_PureOp<"set_encoding",[
+def LinalgExt_SetEncodingOp : LinalgExt_PureOp<"set_encoding",[
    DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface>, Pure
   ]> {
   let summary = "perform pack and pad operation on source";
@@ -959,7 +959,7 @@ def IREELinalgExt_SetEncodingOp : IREELinalgExt_PureOp<"set_encoding",[
   }];
 }
 
-def IREELinalgExt_UpperBoundTileSizeOp : IREELinalgExt_PureOp<"upper_bound_tile_size",
+def LinalgExt_UpperBoundTileSizeOp : LinalgExt_PureOp<"upper_bound_tile_size",
     [Pure]> {
   let summary = "returns an upper bound on tile sizes";
   let description = [{
@@ -978,7 +978,7 @@ def IREELinalgExt_UpperBoundTileSizeOp : IREELinalgExt_PureOp<"upper_bound_tile_
   }];
 }
 
-def IREELinalgExt_UnsetEncodingOp : IREELinalgExt_PureOp<"unset_encoding", [
+def LinalgExt_UnsetEncodingOp : LinalgExt_PureOp<"unset_encoding", [
     DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface>, Pure
   ]> {
   let summary = "perfom unpack and extract operation on source";
@@ -1019,7 +1019,7 @@ def OpGroupWinogradOps : OpDocGroup {
 
 let opDocGroup = OpGroupWinogradOps in {
 
-def IREELinalgExt_WinogradInputTransformOp : IREELinalgExt_Op<"winograd.input_transform",
+def LinalgExt_WinogradInputTransformOp : LinalgExt_Op<"winograd.input_transform",
     [DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface>,
      DeclareOpInterfaceMethods<TilingInterface,
       ["getIterationDomain",
@@ -1121,7 +1121,7 @@ def IREELinalgExt_WinogradInputTransformOp : IREELinalgExt_Op<"winograd.input_tr
   }];
 }
 
-def IREELinalgExt_WinogradOutputTransformOp : IREELinalgExt_Op<"winograd.output_transform",
+def LinalgExt_WinogradOutputTransformOp : LinalgExt_Op<"winograd.output_transform",
     [DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface>,
      DeclareOpInterfaceMethods<TilingInterface,
       ["getIterationDomain",

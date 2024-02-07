@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef IREE_DIALECTS_DIALECT_LINALGEXT_IR_LINALGEXTINTERFACES_H_
-#define IREE_DIALECTS_DIALECT_LINALGEXT_IR_LINALGEXTINTERFACES_H_
+#ifndef IREE_COMPILER_DIALECT_LINALGEXT_IR_LINALGEXTINTERFACES_H_
+#define IREE_COMPILER_DIALECT_LINALGEXT_IR_LINALGEXTINTERFACES_H_
 
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -25,14 +25,14 @@ namespace detail {
 LogicalResult verifyLinalgExtOpInterface(Operation *op);
 }
 
-#include "iree-dialects/Dialect/LinalgExt/IR/LinalgExtOps.h.inc" // IWYU pragma: export
+#include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtOps.h.inc" // IWYU pragma: export
 
 /// Include the generated interface declarations.
-#include "iree-dialects/Dialect/LinalgExt/IR/LinalgExtOpInterfaces.h.inc" // IWYU pragma: export
+#include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtOpInterfaces.h.inc" // IWYU pragma: export
 
 } // namespace LinalgExt
 } // namespace IREE
 } // namespace iree_compiler
 } // namespace mlir
 
-#endif // IREE_DIALECTS_DIALECT_LINALGEXT_IR_LINALGEXTINTERFACES_H_
+#endif // IREE_COMPILER_DIALECT_LINALGEXT_IR_LINALGEXTINTERFACES_H_

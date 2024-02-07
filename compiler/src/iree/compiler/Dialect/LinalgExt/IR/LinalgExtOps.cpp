@@ -4,9 +4,13 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree-dialects/Dialect/LinalgExt/IR/LinalgExtOps.h"
-#include "iree-dialects/Dialect/LinalgExt/IR/LinalgExtDialect.h"
-#include "iree-dialects/Dialect/LinalgExt/Utils/Utils.h"
+#include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtOps.h"
+#include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtDialect.h"
+#include "iree/compiler/Dialect/LinalgExt/Utils/Utils.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SetVector.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/TypeSwitch.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Affine/Utils.h"
 #include "mlir/Dialect/Arith/Utils/Utils.h"
@@ -27,14 +31,9 @@
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Support/MathExtras.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/SetVector.h"
-#include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/TypeSwitch.h"
 
 using namespace mlir;
 using namespace mlir::iree_compiler::IREE::LinalgExt;
-namespace IREE = mlir::iree_compiler::IREE;
 
 //===----------------------------------------------------------------------===//
 // Utils.
@@ -236,7 +235,7 @@ LogicalResult ScatterOp::verify() {
     return op->emitOpError("mismatch in region argument types ")
            << arg0Type << " and " << arg1Type;
   }
-  auto yieldOp = cast<IREE::LinalgExt::YieldOp>(body->getTerminator());
+  auto yieldOp = cast<LinalgExt::YieldOp>(body->getTerminator());
   if (yieldOp->getNumOperands() != 1) {
     return yieldOp.emitOpError("expected region to yield a single value");
   }
@@ -2706,5 +2705,5 @@ LogicalResult UnsetEncodingOp::reifyResultShapes(
 
 // clang-format off
 #define GET_OP_CLASSES
-#include "iree-dialects/Dialect/LinalgExt/IR/LinalgExtOps.cpp.inc" // IWYU pragma: keep
+#include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtOps.cpp.inc" // IWYU pragma: keep
 // clang-format: on

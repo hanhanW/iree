@@ -15,7 +15,7 @@ include "mlir/IR/EnumAttr.td"
 // Dialect definition
 //===----------------------------------------------------------------------===//
 
-def IREELinalgExt_Dialect : Dialect {
+def LinalgExt_Dialect : Dialect {
   let name = "iree_linalg_ext";
   let cppNamespace = "::mlir::iree_compiler::IREE::LinalgExt";
   let summary = [{
@@ -43,23 +43,23 @@ def AnyRankedTensorOrMemRefType : RankedTensorOrMemRefOf<[AnyType]>;
 // Data layout encoding attributes
 //===---------------------------------------------------------------------===//
 
-class IREELinalgExt_Attr<string name, list<Trait> traits = []>
-  : AttrDef<IREELinalgExt_Dialect, name, traits>;
+class LinalgExt_Attr<string name, list<Trait> traits = []>
+  : AttrDef<LinalgExt_Dialect, name, traits>;
 
-class IREELinalgExt_I32EnumAttr<string name, string summary, list<I32EnumAttrCase> cases>
+class LinalgExt_I32EnumAttr<string name, string summary, list<I32EnumAttrCase> cases>
     : I32EnumAttr<name, summary, cases> {
   let cppNamespace = "::mlir::iree_compiler::IREE::LinalgExt";
   let genSpecializedAttr = 0;
 }
 
-class IREELinalgExt_EnumAttr<EnumAttrInfo enumInfo, string name = "">
-  : EnumAttr<IREELinalgExt_Dialect, enumInfo, name>;
+class LinalgExt_EnumAttr<EnumAttrInfo enumInfo, string name = "">
+  : EnumAttr<LinalgExt_Dialect, enumInfo, name>;
 
 def LHS : I32EnumAttrCase<"LHS", 0>;
 def RHS : I32EnumAttrCase<"RHS", 1>;
 def RESULT : I32EnumAttrCase<"RESULT", 2>;
 
-def EncodingRole : IREELinalgExt_I32EnumAttr<"EncodingRole",
+def EncodingRole : LinalgExt_I32EnumAttr<"EncodingRole",
     "Describes the role of the tensor as an operand or a result of an operation.", [
       LHS,
       RHS,
@@ -67,10 +67,10 @@ def EncodingRole : IREELinalgExt_I32EnumAttr<"EncodingRole",
     ]>;
 
 def EncodingRoleAttr :
-  IREELinalgExt_EnumAttr<EncodingRole, "role">;
+  LinalgExt_EnumAttr<EncodingRole, "role">;
 
 def EncodingAttr :
-    IREELinalgExt_Attr<"Encoding"> {
+    LinalgExt_Attr<"Encoding"> {
   let mnemonic = "encoding";
   let summary = [{information to decide how to data-tile a tensor}];
    let description = [{

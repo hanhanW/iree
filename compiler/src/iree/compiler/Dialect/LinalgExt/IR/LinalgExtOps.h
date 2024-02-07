@@ -4,10 +4,10 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef IREE_DIALECTS_DIALECT_LINALGEXT_IR_LINALGEXTOPS_H_
-#define IREE_DIALECTS_DIALECT_LINALGEXT_IR_LINALGEXTOPS_H_
+#ifndef IREE_COMPILER_DIALECT_LINALGEXT_IR_LINALGEXTOPS_H_
+#define IREE_COMPILER_DIALECT_LINALGEXT_IR_LINALGEXTOPS_H_
 
-#include "iree-dialects/Dialect/LinalgExt/IR/LinalgExtInterfaces.h"
+#include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtOpInterfaces.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Dialect.h"
@@ -19,14 +19,14 @@
 
 // clang-format off
 
-#include "iree-dialects/Dialect/LinalgExt/IR/LinalgExtEnums.h.inc" // IWYU pragma: export
+#include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtEnums.h.inc" // IWYU pragma: export
 
 #define GET_ATTRDEF_CLASSES
-#include "iree-dialects/Dialect/LinalgExt/IR/LinalgExtAttrs.h.inc" // IWYU pragma: export
+#include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtAttrs.h.inc" // IWYU pragma: export
 
 #define GET_OP_CLASSES
-#include "iree-dialects/Dialect/LinalgExt/IR/LinalgExtOps.h.inc" // IWYU pragma: export
+#include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtOps.h.inc" // IWYU pragma: export
 
 // clang-format on
 
-#endif // IREE_DIALECTS_DIALECT_LINALGEXT_IR_LINALGEXTOPS_H_
+#endif // IREE_COMPILER_DIALECT_LINALGEXT_IR_LINALGEXTOPS_H_
