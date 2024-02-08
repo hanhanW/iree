@@ -31,8 +31,6 @@ iree_cc_library(
     "CommonExtensionsOps.cpp.inc"
   DEPS
     ::CommonExtensionsOpGen
-    IREEDialectsTransforms
-    IREELinalgExtDialect
     IREELinalgTransformDialect
     IREEVectorExtDialect
     LLVMSupport
@@ -71,6 +69,9 @@ iree_cc_library(
     iree::compiler::Codegen::Utils
     iree::compiler::Dialect::Flow::IR
     iree::compiler::Dialect::HAL::IR
+    iree::compiler::Dialect::LinalgExt::IR
+    iree::compiler::Dialect::LinalgExt::TransformExtensions::LinalgExtExtensions
+    iree::compiler::Dialect::LinalgExt::Transforms
   PUBLIC
 )
 

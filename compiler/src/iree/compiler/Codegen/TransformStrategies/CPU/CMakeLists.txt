@@ -21,8 +21,6 @@ iree_cc_library(
     "ReductionStrategy.cpp"
   DEPS
     IREEDialectsTransforms
-    IREELinalgExtDialect
-    IREELinalgExtTransformOps
     IREELinalgTransformDialect
     LLVMSupport
     MLIRAffineDialect
@@ -61,6 +59,9 @@ iree_cc_library(
     iree::compiler::Codegen::LLVMCPU::TransformExtensions::LLVMCPUExtensions
     iree::compiler::Codegen::TransformStrategies::Common::TransformStrategies
     iree::compiler::Dialect::Flow::IR
+    iree::compiler::Dialect::LinalgExt::IR
+    iree::compiler::Dialect::LinalgExt::TransformExtensions::LinalgExtExtensions
+    iree::compiler::Dialect::LinalgExt::Transforms
   PUBLIC
 )
 

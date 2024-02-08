@@ -29,7 +29,7 @@ class AttentionOp;
 } // namespace mlir
 
 #define GET_OP_CLASSES
-#include "iree/compiler/Dialect/LinalgExt/LinalgExtExtensionsOps/LinalgExtExtensionsOps.h.inc"
+#include "iree/compiler/Dialect/LinalgExt/TransformExtensions/LinalgExtExtensionsOps.h.inc"
 
 namespace mlir {
 namespace iree_compiler {

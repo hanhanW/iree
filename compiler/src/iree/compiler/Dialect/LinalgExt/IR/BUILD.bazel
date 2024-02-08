@@ -78,6 +78,20 @@ iree_gentbl_cc_library(
             ["--gen-op-defs"],
             "LinalgExtOps.cpp.inc",
         ),
+        (
+            [
+                "--dialect=iree_linalg_ext",
+                "--gen-dialect-decls",
+            ],
+            "LinalgExtDialect.h.inc",
+        ),
+        (
+            [
+                "--dialect=iree_linalg_ext",
+                "--gen-dialect-defs",
+            ],
+            "LinalgExtDialect.cpp.inc",
+        ),
     ],
     tblgen = "@llvm-project//mlir:mlir-tblgen",
     td_file = "LinalgExtOps.td",
@@ -90,28 +104,28 @@ iree_gentbl_cc_library(
         (
             [
                 "--gen-attrdef-decls",
-                "--attrdefs-dialect=linalg_ext",
+                "--attrdefs-dialect=iree_linalg_ext",
             ],
             "LinalgExtAttrs.h.inc",
         ),
         (
             [
                 "--gen-attrdef-defs",
-                "--attrdefs-dialect=linalg_ext",
+                "--attrdefs-dialect=iree_linalg_ext",
             ],
             "LinalgExtAttrs.cpp.inc",
         ),
         (
             [
                 "--gen-typedef-decls",
-                "--typedefs-dialect=linalg_ext",
+                "--typedefs-dialect=iree_linalg_ext",
             ],
             "LinalgExtTypes.h.inc",
         ),
         (
             [
                 "--gen-typedef-defs",
-                "--typedefs-dialect=linalg_ext",
+                "--typedefs-dialect=iree_linalg_ext",
             ],
             "LinalgExtTypes.cpp.inc",
         ),
@@ -144,8 +158,10 @@ iree_compiler_cc_library(
         "LinalgExtTypes.h.inc",
     ],
     deps = [
-        ":LinalgExtOpsIncGen",
+        ":LinalgExtEnumsGen",
         ":LinalgExtInterfacesIncGen",
+        ":LinalgExtOpsIncGen",
+        ":LinalgExtTypesGen",
         "//compiler/src/iree/compiler/Dialect/LinalgExt/Utils",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:AffineDialect",

@@ -50,7 +50,6 @@ iree_cc_library(
   DEPS
     ::PassHeaders
     ::PassesIncGen
-    IREEInputDialect
     LLVMSupport
     MLIRArithDialect
     MLIRFuncDialect
@@ -70,6 +69,7 @@ iree_cc_library(
     iree::compiler::Dialect::Flow::Conversion::MeshToFlow
     iree::compiler::Dialect::Flow::IR
     iree::compiler::Dialect::HAL::IR
+    iree::compiler::Dialect::LinalgExt::IR
     iree::compiler::Dialect::Util::IR
     iree::compiler::Utils
   PUBLIC

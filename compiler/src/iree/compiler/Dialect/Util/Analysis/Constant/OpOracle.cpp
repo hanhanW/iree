@@ -6,7 +6,7 @@
 
 #include "iree/compiler/Dialect/Util/Analysis/Constant/OpOracle.h"
 
-#include "iree-dialects/Dialect/LinalgExt/IR/LinalgExtOps.h"
+#include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtOps.h"
 #include "iree/compiler/Dialect/Util/IR/UtilDialect.h"
 #include "iree/compiler/Dialect/Util/IR/UtilOps.h"
 #include "llvm/ADT/SmallPtrSet.h"

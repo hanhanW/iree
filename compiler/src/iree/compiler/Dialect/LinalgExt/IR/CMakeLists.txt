@@ -38,6 +38,8 @@ iree_tablegen_library(
   OUTS
     --gen-op-decls LinalgExtOps.h.inc
     --gen-op-defs LinalgExtOps.cpp.inc
+    --dialect=iree_linalg_ext --gen-dialect-decls LinalgExtDialect.h.inc
+    --dialect=iree_linalg_ext --gen-dialect-defs LinalgExtDialect.cpp.inc
 )
 
 iree_tablegen_library(
@@ -46,10 +48,10 @@ iree_tablegen_library(
   TD_FILE
     "LinalgExtBase.td"
   OUTS
-    --gen-attrdef-decls --attrdefs-dialect=linalg_ext LinalgExtAttrs.h.inc
-    --gen-attrdef-defs --attrdefs-dialect=linalg_ext LinalgExtAttrs.cpp.inc
-    --gen-typedef-decls --typedefs-dialect=linalg_ext LinalgExtTypes.h.inc
-    --gen-typedef-defs --typedefs-dialect=linalg_ext LinalgExtTypes.cpp.inc
+    --gen-attrdef-decls --attrdefs-dialect=iree_linalg_ext LinalgExtAttrs.h.inc
+    --gen-attrdef-defs --attrdefs-dialect=iree_linalg_ext LinalgExtAttrs.cpp.inc
+    --gen-typedef-decls --typedefs-dialect=iree_linalg_ext LinalgExtTypes.h.inc
+    --gen-typedef-defs --typedefs-dialect=iree_linalg_ext LinalgExtTypes.cpp.inc
 )
 
 iree_cc_library(
@@ -74,8 +76,10 @@ iree_cc_library(
     "LinalgExtOps.cpp.inc"
     "LinalgExtTypes.cpp.inc"
   DEPS
+    ::LinalgExtEnumsGen
     ::LinalgExtInterfacesIncGen
     ::LinalgExtOpsIncGen
+    ::LinalgExtTypesGen
     LLVMSupport
     MLIRAffineDialect
     MLIRAffineUtils

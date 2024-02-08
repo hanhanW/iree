@@ -31,6 +31,8 @@ iree_cc_library(
     "LinalgExtExtensionsOps.cpp.inc"
   DEPS
     ::LinalgExtExtensionsOpGen
+    IREEDialectsTransforms
+    IREELinalgTransformDialect
     LLVMSupport
     MLIRAsyncDialect
     MLIRIR
