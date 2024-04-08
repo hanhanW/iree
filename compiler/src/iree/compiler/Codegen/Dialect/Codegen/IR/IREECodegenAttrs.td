@@ -304,4 +304,20 @@ def IREECodegen_ExportConfig : AttrDef<IREECodegen_Dialect, "ExportConfig", []> 
   let genVerifyDecl = 1;
 }
 
+def IREECodegen_EncodingRoundDimsTo : AttrDef<IREECodegen_Dialect, "EncodingRoundDimsTo", []> {
+  let mnemonic = "encoding.round_dims_to";
+  let summary = "The hint provided by host. All the dimensions are aligned"
+    "to the hint";
+  let description = [{
+    Allows setting workgroup size for pre-formed dispatches.
+  }];
+  let parameters = (ins
+      TypeParameter<"int64_t", "Underlying size that dims are aligned to.">:$value
+  );
+  let assemblyFormat = [{
+    `<` $value `>`
+  }];
+  let genVerifyDecl = 1;
+}
+
 #endif // IREE_COMPILER_CODEGEN_DIALECT_IREECODEGENATTRS

@@ -73,6 +73,17 @@ module {
 // -----
 
 module {
+  func.func @encoding_round_dims_to() attributes {
+    encoding.round_dims_to = #iree_codegen.encoding.round_dims_to<16>
+  } {
+    return
+  }
+  // CHECK: #iree_codegen.encoding.round_dims_to<16>
+}
+
+// -----
+
+module {
   /// Lowering config where the middle size of the second level is scalable.
   func.func @scalable_tile_sizes() attributes {
       lowering_config = #iree_codegen.lowering_config<tile_sizes = [[128, 128, 0], [1, [32], 0], [0, 0, 1], [0, 0, 0]]>} {

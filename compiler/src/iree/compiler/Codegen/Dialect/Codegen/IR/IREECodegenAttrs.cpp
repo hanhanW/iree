@@ -54,6 +54,19 @@ ArrayAttr ExportConfigAttr::getWorkgroupSizeIndexArray() {
 }
 
 //===----------------------------------------------------------------------===//
+// iree_codegen.encoding.round_dims_to
+//===----------------------------------------------------------------------===//
+
+LogicalResult
+EncodingRoundDimsToAttr::verify(function_ref<InFlightDiagnostic()> emitError,
+                                int64_t value) {
+  if (value <= 0) {
+    return emitError() << "expected value to be a positive number";
+  }
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
 // iree_codegen.translation_info
 //===----------------------------------------------------------------------===//
 
