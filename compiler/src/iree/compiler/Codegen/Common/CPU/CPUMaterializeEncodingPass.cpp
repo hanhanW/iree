@@ -7,6 +7,7 @@
 #include "iree/compiler/Codegen/Common/CPU/PassDetail.h"
 #include "iree/compiler/Codegen/Common/CPU/Passes.h"
 #include "iree/compiler/Codegen/Common/EncodingUtils.h"
+#include "iree/compiler/Codegen/Dialect/Codegen/IR/IREECodegenAttrs.h"
 #include "iree/compiler/Codegen/Dialect/Codegen/IR/IREECodegenDialect.h"
 #include "iree/compiler/Codegen/Dialect/Codegen/IR/IREECodegenOps.h"
 #include "iree/compiler/Codegen/Utils/Utils.h"
@@ -25,6 +26,8 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+
+#define DEBUG_TYPE "cpu-materialize-encoding"
 
 namespace mlir::iree_compiler {
 
@@ -428,7 +431,8 @@ private:
 
 FailureOr<MaterializeEncodingInfo>
 materializeEncodingForTarget(RankedTensorType tensorType,
-                             ExecutableTargetAttr targetAttr) {
+                             ExecutableTargetAttr targetAttr,
+                             std::optional<int64_t> alignment = std::nullopt) {
   IREE::LinalgExt::EncodingAttr encoding =
       tensorType.getEncoding()
           .dyn_cast_or_null<IREE::LinalgExt::EncodingAttr>();
@@ -469,6 +473,19 @@ materializeEncodingForTarget(RankedTensorType tensorType,
   // taking narrow dimensions into account.
   TileMxNxK chosenTileMxNxK =
       chooseMatmulTile(enumeratedTileMxNxK, matmulNarrowM, matmulNarrowN);
+
+  SmallVector<int64_t> tileSizes = {chosenTileMxNxK.M, chosenTileMxNxK.N,
+                                    chosenTileMxNxK.K};
+  if (alignment.has_value() && llvm::any_of(tileSizes, [&](int64_t v) {
+        return v > alignment.value();
+      })) {
+    LLVM_DEBUG(llvm::dbgs() << "failed, because some of selected tile sizes (";
+               llvm::interleaveComma(tileSizes, llvm::dbgs());
+               llvm::dbgs() << ") are greater than alignment("
+                            << alignment.value() << ")\n";);
+    return failure();
+  }
+
   // Map the matmul TileMxNxK to an actual tile shape for the tensor at hand,
   // based on its role in the matmul.
   auto rank = tensorType.getRank();
@@ -476,12 +493,16 @@ materializeEncodingForTarget(RankedTensorType tensorType,
 }
 
 static MaterializeEncodingFn
-getMaterializeEncodingFn(ExecutableTargetAttr targetAttr) {
-  return
-      [targetAttr](
-          RankedTensorType tensorType) -> FailureOr<MaterializeEncodingInfo> {
-        return materializeEncodingForTarget(tensorType, targetAttr);
-      };
+getMaterializeEncodingFn(ExecutableTargetAttr targetAttr,
+                         IREE::Codegen::EncodingRoundDimsToAttr alignment) {
+  std::optional<int64_t> alignmentValue;
+  if (alignment) {
+    alignmentValue = alignment.getValue();
+  }
+  return [targetAttr, alignmentValue](RankedTensorType tensorType)
+             -> FailureOr<MaterializeEncodingInfo> {
+    return materializeEncodingForTarget(tensorType, targetAttr, alignmentValue);
+  };
 }
 
 // Like getMaterializeEncodingFn, but iterating over an array of targets and
@@ -556,9 +577,13 @@ void CPUMaterializeEncodingPass::runOnOperation() {
   MLIRContext *context = &getContext();
   auto operation = getOperation();
   RewritePatternSet materializeEncodingPattern(context);
-  if (!targetAttr)
+  if (!targetAttr) {
     targetAttr = ExecutableTargetAttr::lookup(operation);
-  auto materializeEncodingFn = getMaterializeEncodingFn(targetAttr);
+  }
+  auto alignment =
+      operation->getAttrOfType<IREE::Codegen::EncodingRoundDimsToAttr>(
+          IREE::Codegen::EncodingRoundDimsToAttr::getMnemonic());
+  auto materializeEncodingFn = getMaterializeEncodingFn(targetAttr, alignment);
   if (!materializeEncodingFn) {
     return signalPassFailure();
   }

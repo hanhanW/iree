@@ -380,7 +380,7 @@ declareEntryPointOps(IREE::Stream::ExecutableOp sourceExecutableOp,
             workgroupSizeVals.resize(3, targetBuilder.getIndexAttr(1));
             workgroupSize = targetBuilder.getArrayAttr(workgroupSizeVals);
           }
-          break;
+         break;
         }
       }
 
@@ -436,6 +436,13 @@ declareEntryPointOps(IREE::Stream::ExecutableOp sourceExecutableOp,
         auto variantFuncOp = cloneFuncWithInterface(sourceFuncOp, resourceMap,
                                                     variantLayoutAttr);
         targetFuncOps[sourceFuncOp][variantOp] = variantFuncOp;
+
+        if (auto attr =
+                exportOp->getAttrOfType<Codegen::EncodingRoundDimsToAttr>(
+                    Codegen::EncodingRoundDimsToAttr::getMnemonic())) {
+          variantFuncOp->setAttr(
+              Codegen::EncodingRoundDimsToAttr::getMnemonic(), attr);
+        }
       }
     }
 

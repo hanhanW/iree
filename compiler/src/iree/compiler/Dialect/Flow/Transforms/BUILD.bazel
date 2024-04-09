@@ -58,6 +58,7 @@ iree_compiler_cc_library(
         "PassDetail.h",
         "Passes.cpp",
         "RegionOpUtils.cpp",
+        "SetEncodingHintOnDispatches.cpp",
         "SplitReduction.cpp",
         "TensorPadToTensorInsertSlice.cpp",
         "TopLevelSCFToCFG.cpp",
@@ -72,6 +73,7 @@ iree_compiler_cc_library(
     ],
     deps = [
         ":PassesIncGen",
+        "//compiler/src/iree/compiler/Codegen/Dialect/Codegen/IR:IREECodegenDialect",
         "//compiler/src/iree/compiler/Dialect/Flow/Conversion/TensorToFlow",
         "//compiler/src/iree/compiler/Dialect/Flow/IR",
         "//compiler/src/iree/compiler/Dialect/HAL/IR",

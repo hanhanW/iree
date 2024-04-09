@@ -249,6 +249,13 @@ def OutlineDispatchRegions :
   let constructor = "mlir::iree_compiler::IREE::Flow::createOutlineDispatchRegionsPass()";
 }
 
+def SetEncodingHintOnDispatches :
+    InterfacePass<"iree-flow-set-encoding-hint-on-dispatches", "mlir::FunctionOpInterface"> {
+  let summary = "Set the encoding hints on dispatches and replace"
+      "upper_bound_tile_size with such constants.";
+  let constructor = "mlir::iree_compiler::IREE::Flow::createSetEncodingHintOnDispatchesPass()";
+}
+
 def SplitReduction :
     Pass<"iree-flow-split-reduction-ops", ""> {
   let summary = "Split reduction dimension to increase parallelism.";

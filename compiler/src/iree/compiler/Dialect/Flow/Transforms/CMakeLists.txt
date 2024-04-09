@@ -57,6 +57,7 @@ iree_cc_library(
     "PassDetail.h"
     "Passes.cpp"
     "RegionOpUtils.cpp"
+    "SetEncodingHintOnDispatches.cpp"
     "SplitReduction.cpp"
     "TensorPadToTensorInsertSlice.cpp"
     "TopLevelSCFToCFG.cpp"
@@ -97,6 +98,7 @@ iree_cc_library(
     MLIRTransformDialectTransforms
     MLIRTransformUtils
     MLIRTransforms
+    iree::compiler::Codegen::Dialect::Codegen::IR::IREECodegenDialect
     iree::compiler::Dialect::Flow::Conversion::TensorToFlow
     iree::compiler::Dialect::Flow::IR
     iree::compiler::Dialect::HAL::IR

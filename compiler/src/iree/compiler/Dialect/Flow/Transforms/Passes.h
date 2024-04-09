@@ -183,6 +183,9 @@ createInsertDebugTargetAtOrdinalPass(std::string breakDebugTarget = "",
 // Exports all functions and dispatch executables as `() -> ()` benchmark funcs.
 std::unique_ptr<OperationPass<mlir::ModuleOp>> createExportBenchmarkFuncsPass();
 
+std::unique_ptr<InterfacePass<mlir::FunctionOpInterface>>
+createSetEncodingHintOnDispatchesPass();
+
 //===----------------------------------------------------------------------===//
 // Optimizations
 //===----------------------------------------------------------------------===//

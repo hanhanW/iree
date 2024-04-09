@@ -199,7 +199,10 @@ void buildFlowTransformPassPipeline(OpPassManager &passManager,
       })
       ////////////////////////////////////////////////////////////////////////
       .addPass(createCaptureDynamicDimsPass)
-      .addPass(mlir::createCanonicalizerPass)
+      .addPass(createCanonicalizerPass)
+      .addPass(createCSEPass)
+      .addPass(createSetEncodingHintOnDispatchesPass)
+      .addPass(createCanonicalizerPass)
       .addPass(createCSEPass)
 
       // Initialize any empty tensors to zero.
