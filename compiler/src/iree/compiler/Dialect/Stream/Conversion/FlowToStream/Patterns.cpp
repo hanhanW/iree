@@ -6,6 +6,7 @@
 
 #include "iree/compiler/Dialect/Stream/Conversion/FlowToStream/Patterns.h"
 
+#include "iree/compiler/Codegen/Dialect/Codegen/IR/IREECodegenAttrs.h"
 #include "iree/compiler/Dialect/Flow/IR/FlowDialect.h"
 #include "iree/compiler/Dialect/Flow/IR/FlowOps.h"
 #include "iree/compiler/Dialect/Stream/Conversion/PatternUtils.h"
@@ -512,6 +513,10 @@ struct ConvertDispatchOp : public OpConversionPattern<IREE::Flow::DispatchOp> {
     // Zero is going to be used for each operand to start.
     auto zeroOffset = rewriter.create<arith::ConstantIndexOp>(op.getLoc(), 0);
 
+    auto maybeEncodingAttr =
+        op->getAttrOfType<IREE::Codegen::EncodingRoundDimsToAttr>(
+            IREE::Codegen::EncodingRoundDimsToAttr::getMnemonic());
+
     // Query and resolve all operands and their sizes.
     SmallVector<Value> dispatchOperands;
     SmallVector<Value> dispatchOperandSizes;
@@ -555,8 +560,14 @@ struct ConvertDispatchOp : public OpConversionPattern<IREE::Flow::DispatchOp> {
       } else {
         auto resultDynamicDims = IREE::Util::buildDynamicDimsForValue(
             op.getLoc(), result.value(), rewriter);
-        resultSizes.push_back(buildResultSizeOf(op.getLoc(), result.value(),
-                                                resultDynamicDims, rewriter));
+        auto sizeOfOp = buildResultSizeOf(op.getLoc(), result.value(),
+                                          resultDynamicDims, rewriter);
+        if (maybeEncodingAttr) {
+          sizeOfOp.getDefiningOp()->setAttr(
+              IREE::Codegen::EncodingRoundDimsToAttr::getMnemonic(),
+              maybeEncodingAttr);
+        }
+        resultSizes.push_back(sizeOfOp);
         resultTypes.push_back(unknownType);
       }
     }
