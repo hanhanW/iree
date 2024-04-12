@@ -2777,6 +2777,26 @@ LogicalResult UnsetEncodingOp::reifyResultShapes(
   return success();
 }
 
+//===----------------------------------------------------------------------===//
+// iree_linalg_ext.encoding
+//===----------------------------------------------------------------------===//
+
+EncodingAttr EncodingAttr::get(MLIRContext *context, EncodingRole role,
+                               ArrayRef<Type> elemTypes, Type origType,
+                               std::optional<int64_t> matmulNarrowM,
+                               std::optional<int64_t> matmulNarrowN,
+                               ArrayRef<AffineMap> maps,
+                               ArrayRef<int64_t> roundDimsTo) {
+  Builder b(context);
+  auto optionalToAttr = [&](std::optional<int64_t> x) {
+    return x ? b.getI64IntegerAttr(*x) : IntegerAttr();
+  };
+  return get(context, EncodingRoleAttr::get(context, role),
+             b.getTypeArrayAttr(elemTypes), TypeAttr::get(origType),
+             optionalToAttr(matmulNarrowM), optionalToAttr(matmulNarrowN),
+             b.getAffineMapArrayAttr(maps), roundDimsTo);
+}
+
 // clang-format off
 #define GET_OP_CLASSES
 #include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtOps.cpp.inc" // IWYU pragma: keep
