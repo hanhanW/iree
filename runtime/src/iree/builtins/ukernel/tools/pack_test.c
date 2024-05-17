@@ -6,6 +6,7 @@
 
 #include "iree/base/api.h"
 #include "iree/builtins/ukernel/api.h"
+#include "iree/builtins/ukernel/exported_bits.h"
 #include "iree/builtins/ukernel/pack_internal.h"
 #include "iree/builtins/ukernel/tools/test.h"
 #include "iree/builtins/ukernel/tools/util.h"
@@ -76,7 +77,8 @@ static void iree_uk_test_pack_for_shape_params(
   // Populate strides first - we need them below to compute buffer lengths.
   // Randomly make strides either tight or not to exercise all cases.
   iree_uk_random_engine_t* engine = iree_uk_test_random_engine(test);
-  params.in_stride0 = params.in_size1 + iree_uk_random_engine_get_0_1(engine);
+  params.in_stride0 = params.in_size1 +
+                      iree_uk_random_engine_get_0_1(engine) * params.out_size3;
   params.out_stride0 = params.out_size1 * params.out_size2 * params.out_size3;
   iree_uk_pack_type_t pack_type = iree_uk_pack_type(params.flags);
   iree_uk_type_t in_type = iree_uk_pack_in_type(pack_type);
@@ -227,6 +229,7 @@ int main(int argc, char** argv) {
   iree_uk_test_pack(IREE_UK_FLAG_PACK_TYPE_F32F32, 8, 8, "avx2_fma");
   iree_uk_test_pack(IREE_UK_FLAG_PACK_TYPE_I32I32, 8, 8, "avx2_fma");
   iree_uk_test_pack(IREE_UK_FLAG_PACK_TYPE_F32F32, 16, 1, "avx512_base");
+  iree_uk_test_pack(IREE_UK_FLAG_PACK_TYPE_BF16BF16, 16, 2, "avx512_base");
   iree_uk_test_pack(IREE_UK_FLAG_PACK_TYPE_I8I8, 16, 2, "avx512_base");
   iree_uk_test_pack(IREE_UK_FLAG_PACK_TYPE_F32F32, 16, 16, "avx512_base");
   iree_uk_test_pack(IREE_UK_FLAG_PACK_TYPE_I32I32, 16, 16, "avx512_base");
