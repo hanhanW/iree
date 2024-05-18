@@ -513,7 +513,8 @@ getDefaultDistributionTileSizes(ArrayRef<int64_t> lbs, ArrayRef<int64_t> ubs,
     assert(lbs[i] <= ubs[i]);
     workload[i] = ubs[i] - lbs[i];
     int64_t candidateTileSize = 1;
-    int64_t targetSize = std::min(workload[i] / 2, maxTileSizes[i]);
+    int64_t targetSize =
+        std::min(workload[i] / clNumberOfRuntimeThreads, maxTileSizes[i]);
     int64_t vectorSize = vectorSizeHints[i];
     if (vectorSize > 1) {
       // Pick the factor of dim which is closest to the target tile size and
@@ -1641,19 +1642,17 @@ static LogicalResult setRootConfig(mlir::FunctionOpInterface entryPointFn,
                                    tensor::PackOp op) {
   assert(!getLoweringConfig(op) && "expected lowering_config is not set");
 
+  int srcRank = op.getSourceRank();
   int64_t vectorSize = getVectorSize(entryPointFn, op.getSourceType());
   DistributionHeuristicConfig distConfig;
+  distConfig.maxTileSizes.resize(srcRank, clDefaultDistTileSize);
   distConfig.allowIncompleteTile = true;
-  distConfig.vectorSizeHints.resize(op.getSourceRank(), 1);
+  distConfig.vectorSizeHints.resize(srcRank, 1);
   for (auto dim : op.getInnerDimsPos()) {
     distConfig.vectorSizeHints[dim] = vectorSize;
   }
   SmallVector<int64_t> distTileSizes =
       getDefaultDistributedLevelTileSizes(op, distConfig);
-  SmallVector<int64_t> workload(op.getSourceType().getShape());
-  reduceDistributionWorkgroups(workload, distTileSizes,
-                               /*maxTileSizes=*/std::nullopt,
-                               distConfig.vectorSizeHints);
 
   // The default function aims to returns the number of workload per workgroup,
   // but it does not know that it is working on packed domain. We need to take
@@ -1676,10 +1675,10 @@ static LogicalResult setRootConfig(mlir::FunctionOpInterface entryPointFn,
 
 static LogicalResult setRootConfig(mlir::FunctionOpInterface entryPointFn,
                                    tensor::UnPackOp op) {
+  DistributionHeuristicConfig distConfig;
+  distConfig.maxTileSizes.resize(op.getDestRank(), clDefaultDistTileSize);
   SmallVector<int64_t> distTileSizes =
-      getDefaultDistributedLevelTileSizes(op, DistributionHeuristicConfig{});
-  SmallVector<int64_t> workload(op.getDestType().getShape());
-  reduceDistributionWorkgroups(workload, distTileSizes);
+      getDefaultDistributedLevelTileSizes(op, distConfig);
 
   // Fixup for making distTileSizes be multiple of inner_tile_sizes.
   SmallVector<int64_t> innerTiles = op.getStaticTiles();
@@ -1817,8 +1816,6 @@ setDefaultGenericOpRootConfig(mlir::FunctionOpInterface entryPointFn,
   }
 
   DistributionHeuristicConfig distConfig;
-  distConfig.minTileSizes = getMinTilingSizesForEachDim(
-      entryPointFn, genericOp, linalgOpInfo, targetMLTransInfo);
   // For generic ops we'll use the default divided by 2 to control the stack
   // allocation limit See #9469 for example.
   distConfig.maxTileSizes.append(numLoops, clDefaultDistTileSize / 2);
@@ -1835,7 +1832,10 @@ setDefaultGenericOpRootConfig(mlir::FunctionOpInterface entryPointFn,
 
   // Set the next level tile sizes.
   SmallVector<int64_t> vecTileSizes;
-  setVectorTileSizes(genericOp, distTileSizes, distConfig.minTileSizes,
+  setVectorTileSizes(genericOp, distTileSizes,
+                     getMinTilingSizesForEachDim(entryPointFn, genericOp,
+                                                 linalgOpInfo,
+                                                 targetMLTransInfo),
                      distConfig.maxTileSizes, vecPreProcStrategy, vecTileSizes);
   limitVectorTileSizes(genericOp, vecTileSizes);
   SmallVector<int64_t> parallelTileSizes = vecTileSizes;
