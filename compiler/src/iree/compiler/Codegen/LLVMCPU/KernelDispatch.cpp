@@ -1637,11 +1637,12 @@ getPackVectorTileSizes(mlir::FunctionOpInterface entryPointFn,
   if (!hasAVX512fFeature(targetAttr) || !isPackMatmulLHS(op)) {
     return tileSizes;
   }
-  if (op.getSourceType().getElementType().isF32()) {
+  Type elemType = op.getSourceType().getElementType();
+  if (elemType.isF32()) {
     tileSizes.back() = vectorSize;
   }
   // TODO(#16314): Generate efficient tile sizes for non-f32 cases.
-  if (op.getSourceType().getElementType().isF16()) {
+  if (elemType.isF16() || elemType.isBF16()) {
     // We adjust the vector size to half to use the same lowering strategy as
     // f32.
     tileSizes.back() = vectorSize / 2;
