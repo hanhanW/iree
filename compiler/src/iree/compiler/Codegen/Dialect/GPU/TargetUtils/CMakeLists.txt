@@ -25,6 +25,7 @@ iree_cc_library(
     MLIRSupport
     iree::compiler::Codegen::Dialect::Codegen::IR::IREECodegenDialect
     iree::compiler::Codegen::Dialect::GPU::IR::IREEGPUDialect
+    iree::compiler::Dialect::LinalgExt::IR
   PUBLIC
 )
 
