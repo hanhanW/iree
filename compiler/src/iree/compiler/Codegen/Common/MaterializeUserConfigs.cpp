@@ -34,10 +34,19 @@ llvm::cl::opt<std::string> clCodegenTransformDialectLibraryFileName(
         "This is specified as <file-path>@<sequence-name>. If not specified,"
         "this will default to `__kernel_config`."),
     llvm::cl::init(""));
+llvm::cl::opt<std::string> clCodegenMLIRUkernelFileName(
+    "iree-codegen-mlir-ukernel-file-name",
+    llvm::cl::desc(
+        "File path to a module containing a set of MLIR based ukernels."),
+    llvm::cl::init(""));
 
 namespace {
 
 static const char kTranslationInfoAttrName[] = "translation_info";
+
+//===----------------------------------------------------------------------===//
+// Transform dialect spec.
+//===----------------------------------------------------------------------===//
 
 enum StrategyRunResult {
   Success = 0,
@@ -66,16 +75,17 @@ runTransformConfigurationStrategy(Operation *payloadRoot,
   return StrategyRunResult::Success;
 }
 
-// Parse the file path and kernel config strategy from flags. There are
-// two possible usage flows for transform dialect libraries.
-//   1. Use `__kernel_config` to match and annotate variants with the
-//      strategy to use. This could either be a transform dialect strategy
-//      or any other IREE codegen pipeline.
-//
-//   2. Use the configuration strategy to do codegen directly. At the end
-//   of
-//      the strategy, the variant needs to be annotated with
-//      "translation_info" = #iree_codegen.translation_info<None>
+/// Parses the file path and kernel config strategy from flags and runs the
+/// transform dialect spec. There are two possible usage flows for transform
+/// dialect libraries.
+///   1. Use `__kernel_config` to match and annotate variants with the
+///      strategy to use. This could either be a transform dialect strategy
+///      or any other IREE codegen pipeline.
+///
+///   2. Use the configuration strategy to do codegen directly. At the end
+///   of
+///      the strategy, the variant needs to be annotated with
+///      "translation_info" = #iree_codegen.translation_info<None>
 static std::optional<ModuleOp>
 parseAndRunTransformDialectSpec(FunctionOpInterface funcOp) {
   SmallVector<StringRef, 2> parts;
@@ -135,6 +145,97 @@ parseAndRunTransformDialectSpec(FunctionOpInterface funcOp) {
   return transformLibrary;
 }
 
+//===----------------------------------------------------------------------===//
+// MLIR based ukernels.
+//===----------------------------------------------------------------------===//
+
+static LogicalResult getMatchedUkernels(FunctionOpInterface funcOp,
+                                        FunctionOpInterface &ukernelOp) {
+  std::optional<ModuleOp> ukernelModule;
+  auto dialect = funcOp->getContext()
+                     ->getOrLoadDialect<IREE::Codegen::IREECodegenDialect>();
+  auto maybeUkernelModule =
+      dialect->getOrLoadUkernelModule(clCodegenMLIRUkernelFileName);
+  if (failed(maybeUkernelModule)) {
+    funcOp.emitError() << "failed to load transform ukernel module: "
+                       << clCodegenMLIRUkernelFileName;
+    return failure();
+  }
+  ukernelModule = *maybeUkernelModule;
+  LDBG("--found ukernel library @" << clCodegenMLIRUkernelFileName);
+
+  SmallVector<linalg::GenericOp> genericOps;
+  funcOp.walk([&](linalg::GenericOp op) { genericOps.push_back(op); });
+  auto match = [&](FunctionOpInterface op) -> std::optional<linalg::GenericOp> {
+    DictionaryAttr config = getTranslationInfo(op).getConfiguration();
+    if (!config) {
+      return std::nullopt;
+    }
+    SmallVector<AffineMap> indexingMaps =
+        llvm::map_to_vector(config.getAs<ArrayAttr>("indexing_maps").getValue(),
+                            [&](Attribute attr) {
+                              return cast<AffineMapAttr>(attr).getAffineMap();
+                            });
+    SmallVector<int64_t> loopRanges(
+        config.getAs<DenseI64ArrayAttr>("loop_range").asArrayRef());
+
+    for (auto genericOp : genericOps) {
+      LDBG("--matching " << genericOp);
+      SmallVector<AffineMap> genericIndexingMaps =
+          genericOp.getIndexingMapsArray();
+      if (genericIndexingMaps != indexingMaps) {
+        LDBG("----indexing maps mismatch");
+        continue;
+      }
+      SmallVector<int64_t> genericLoopRanges = genericOp.getStaticLoopRanges();
+      if (genericLoopRanges != loopRanges) {
+        LDBG("----loop ranges mismatch");
+        continue;
+      }
+      LDBG("----match!");
+      return genericOp;
+    }
+    return std::nullopt;
+  };
+  for (auto candidate : ukernelModule->getOps<FunctionOpInterface>()) {
+    if (!match(candidate)) {
+      continue;
+    }
+    ukernelOp = candidate;
+    break;
+  }
+
+  return success();
+}
+
+static LogicalResult injectUkernelOp(ModuleOp moduleOp,
+                                     FunctionOpInterface ukernelFuncOp) {
+  MLIRContext *ctx = moduleOp.getContext();
+  IRRewriter rewriter(ctx);
+  rewriter.setInsertionPointToStart(&moduleOp.getBodyRegion().front());
+  // Check for duplicates.
+  auto fnDecl = dyn_cast_or_null<func::FuncOp>(
+      SymbolTable::lookupSymbolIn(moduleOp, ukernelFuncOp.getName()));
+  if (!fnDecl) {
+    Location loc = moduleOp.getLoc();
+    fnDecl = rewriter.create<func::FuncOp>(
+        loc, ukernelFuncOp.getName(),
+        cast<FunctionType>(ukernelFuncOp.getFunctionType()));
+    SymbolTable::setSymbolVisibility(fnDecl, SymbolTable::Visibility::Private);
+    fnDecl.getBody().takeBody(ukernelFuncOp.getFunctionBody());
+    if (failed(setTranslationInfo(fnDecl, getTranslationInfo(ukernelFuncOp)))) {
+      return failure();
+    }
+  } else {
+    return failure();
+  }
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// Pass Implementation.
+//===----------------------------------------------------------------------===//
+
 struct MaterializeUserConfigsPass
     : public MaterializeUserConfigsBase<MaterializeUserConfigsPass> {
   void getDependentDialects(DialectRegistry &registry) const override {
@@ -148,6 +249,20 @@ struct MaterializeUserConfigsPass
       if (!clCodegenTransformDialectLibraryFileName.empty()) {
         transformLibrary = parseAndRunTransformDialectSpec(funcOp);
         if (!transformLibrary) {
+          return signalPassFailure();
+        }
+      }
+
+      if (!clCodegenMLIRUkernelFileName.empty()) {
+        FunctionOpInterface ukernelOp;
+        if (failed(getMatchedUkernels(funcOp, ukernelOp))) {
+          funcOp.emitError() << "failed to parse ukernel file: "
+                             << clCodegenMLIRUkernelFileName;
+          return signalPassFailure();
+        }
+        if (ukernelOp && failed(injectUkernelOp(moduleOp, ukernelOp))) {
+          funcOp.emitError() << "failed to inject ukernel op: "
+                             << clCodegenMLIRUkernelFileName;
           return signalPassFailure();
         }
       }

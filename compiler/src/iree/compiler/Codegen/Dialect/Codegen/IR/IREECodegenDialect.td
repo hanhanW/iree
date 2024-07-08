@@ -39,6 +39,9 @@ def IREECodegen_Dialect : Dialect {
     FailureOr<::mlir::ModuleOp>
     getOrLoadTransformLibraryModule(std::string libraryPath);
 
+    FailureOr<::mlir::ModuleOp>
+    getOrLoadUkernelModule(std::string path);
+
     private:
 
     /// Map containing modules containing symbols, e.g. named sequences, that
@@ -51,6 +54,9 @@ def IREECodegen_Dialect : Dialect {
     /// Lock to control the updating of the library modules such that we only load
     /// the module once and can reuse it across all invocations.
     std::mutex libraryMutex;
+
+    ::llvm::StringMap<::mlir::OwningOpRef<::mlir::ModuleOp>> ukernelModules;
+    std::mutex ukernelMutex;
   }];
   let useDefaultAttributePrinterParser = 1;
 }
