@@ -66,6 +66,75 @@ runTransformConfigurationStrategy(Operation *payloadRoot,
   return StrategyRunResult::Success;
 }
 
+// Parse the file path and kernel config strategy from flags. There are
+// two possible usage flows for transform dialect libraries.
+//   1. Use `__kernel_config` to match and annotate variants with the
+//      strategy to use. This could either be a transform dialect strategy
+//      or any other IREE codegen pipeline.
+//
+//   2. Use the configuration strategy to do codegen directly. At the end
+//   of
+//      the strategy, the variant needs to be annotated with
+//      "translation_info" = #iree_codegen.translation_info<None>
+static std::optional<ModuleOp>
+parseAndRunTransformDialectSpec(FunctionOpInterface funcOp) {
+  SmallVector<StringRef, 2> parts;
+  llvm::SplitString(llvm::StringRef(clCodegenTransformDialectLibraryFileName),
+                    parts, "@");
+  if (parts.size() > 2 || parts.empty()) {
+    funcOp.emitError() << "Invalid transform library path and sequence name "
+                       << clCodegenTransformDialectLibraryFileName;
+    return std::nullopt;
+  }
+
+  std::string libraryFileName;
+  if (parts[0].empty()) {
+    funcOp.emitError() << "Cannot specify an empty library path";
+    return std::nullopt;
+  }
+  libraryFileName = parts[0];
+
+  std::string entrySequenceName;
+  // Check if the user specified a custom entry point name.
+  if (parts.size() == 2) {
+    if (parts[1].empty()) {
+      funcOp.emitError() << "Cannot specify an empty sequence name";
+      return std::nullopt;
+    }
+    entrySequenceName = parts[1];
+  } else {
+    entrySequenceName = "__kernel_config";
+  }
+
+  LDBG("MaterializeUserConfigsPass on function: " << funcOp);
+  std::optional<ModuleOp> transformLibrary = std::nullopt;
+  auto dialect = funcOp->getContext()
+                     ->getOrLoadDialect<IREE::Codegen::IREECodegenDialect>();
+  auto maybeTransformLibrary =
+      dialect->getOrLoadTransformLibraryModule(libraryFileName);
+  if (failed(maybeTransformLibrary)) {
+    funcOp.emitError() << "failed to load transform library module: "
+                       << libraryFileName;
+    return std::nullopt;
+  }
+  transformLibrary = *maybeTransformLibrary;
+  LDBG("--found transform library @" << libraryFileName);
+
+  auto runResult = runTransformConfigurationStrategy(funcOp, entrySequenceName,
+                                                     *transformLibrary);
+  if (runResult == StrategyRunResult::NotFound) {
+    funcOp.emitError() << "transform kernel config strategy `"
+                       << entrySequenceName << " not found";
+    return std::nullopt;
+  } else if (runResult == StrategyRunResult::Failed) {
+    funcOp.emitError() << "transform kernel config strategy `"
+                       << entrySequenceName << "` failed to apply";
+    return std::nullopt;
+  }
+
+  return transformLibrary;
+}
+
 struct MaterializeUserConfigsPass
     : public MaterializeUserConfigsBase<MaterializeUserConfigsPass> {
   void getDependentDialects(DialectRegistry &registry) const override {
@@ -74,76 +143,11 @@ struct MaterializeUserConfigsPass
 
   void runOnOperation() override {
     auto moduleOp = getOperation();
-    MLIRContext *context = &getContext();
     for (auto funcOp : moduleOp.getOps<FunctionOpInterface>()) {
-
-      // Parse the file path and kernel config strategy from flags. There are
-      // two possible usage flows for transform dialect libraries.
-      //   1. Use `__kernel_config` to match and annotate variants with the
-      //      strategy to use. This could either be a transform dialect strategy
-      //      or any other IREE codegen pipeline.
-      //
-      //   2. Use the configuration strategy to do codegen directly. At the end
-      //   of
-      //      the strategy, the variant needs to be annotated with
-      //      "translation_info" = #iree_codegen.translation_info<None>
-      SmallVector<StringRef, 2> parts;
-      llvm::SplitString(
-          llvm::StringRef(clCodegenTransformDialectLibraryFileName), parts,
-          "@");
-      if (parts.size() > 2) {
-        funcOp.emitError()
-            << "Invalid transform library path and sequence name "
-            << clCodegenTransformDialectLibraryFileName;
-        return signalPassFailure();
-      }
-      bool hasTransformLibrary = !parts.empty();
-
-      std::string libraryFileName;
-      if (hasTransformLibrary) {
-        if (parts[0].empty()) {
-          funcOp.emitError() << "Cannot specify an empty library path";
-          return signalPassFailure();
-        }
-        libraryFileName = parts[0];
-      }
-
-      std::string entrySequenceName;
-      // Check if the user specified a custom entry point name.
-      if (parts.size() == 2) {
-        if (parts[1].empty()) {
-          funcOp.emitError() << "Cannot specify an empty sequence name";
-          return signalPassFailure();
-        }
-        entrySequenceName = parts[1];
-      } else {
-        entrySequenceName = "__kernel_config";
-      }
-
-      LDBG("MaterializeUserConfigsPass on function: " << funcOp);
-      std::optional<ModuleOp> transformLibrary = std::nullopt;
-      if (hasTransformLibrary) {
-        auto dialect =
-            context->getOrLoadDialect<IREE::Codegen::IREECodegenDialect>();
-        auto maybeTransformLibrary =
-            dialect->getOrLoadTransformLibraryModule(libraryFileName);
-        if (failed(maybeTransformLibrary)) {
-          funcOp.emitError()
-              << "failed to load transform library module: " << libraryFileName;
-          return signalPassFailure();
-        }
-        transformLibrary = *maybeTransformLibrary;
-        LDBG("--found transform library @" << libraryFileName);
-
-        auto runResult = runTransformConfigurationStrategy(
-            funcOp, entrySequenceName, *transformLibrary);
-        if (runResult == StrategyRunResult::NotFound) {
-          funcOp.emitError() << "transform kernel config strategy `"
-                             << entrySequenceName << " not found";
-          return signalPassFailure();
-        } else if (runResult == StrategyRunResult::Failed) {
-          funcOp.emitError() << "transform kernel config strategy `"
-                             << entrySequenceName << "` failed to apply";
+      std::optional<ModuleOp> transformLibrary;
+      if (!clCodegenTransformDialectLibraryFileName.empty()) {
+        transformLibrary = parseAndRunTransformDialectSpec(funcOp);
+        if (!transformLibrary) {
           return signalPassFailure();
         }
       }
@@ -152,6 +156,7 @@ struct MaterializeUserConfigsPass
       IREE::Codegen::TranslationInfoAttr translationInfo =
           getTranslationInfo(funcOp);
       if (translationInfo) {
+        LDBG("--already has translationInfo: " << translationInfo);
         return;
       }
 
