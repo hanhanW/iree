@@ -109,6 +109,7 @@ iree_cc_library(
     "IREEExpandStridedMetadata.cpp"
     "InstrumentMemoryAccesses.cpp"
     "LowerExecutableUsingTransformDialect.cpp"
+    "LowerGenericOpsToCalls.cpp"
     "LowerUKernelsToCalls.cpp"
     "MaterializeEncodingIntoNop.cpp"
     "MaterializeEncodingIntoPackUnPack.cpp"

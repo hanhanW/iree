@@ -413,14 +413,7 @@ void addGPUWinogradVectorizePassPipeline(OpPassManager &funcPassManager) {
 //===---------------------------------------------------------------------===//
 
 void addGPUMLIRUkernelPassPipeline(OpPassManager &funcPassManager) {
-  tileAndDistributeToWorkgroup(funcPassManager);
-  funcPassManager.addPass(createCanonicalizerPass());
-  funcPassManager.addPass(createCSEPass());
-  // tensor to memref
-  addBufferizePasses(funcPassManager);
-  GPUDistributeScfForPassOptions options;
-  options.useBlockDims = false;
-  funcPassManager.addPass(createGPUDistributeScfForPass(options));
+  tileAndBufferize(funcPassManager);
 
   // Post bufferization optimizations.
   funcPassManager.addPass(createLoopInvariantCodeMotionPass());
@@ -964,6 +957,7 @@ static void addLowerToLLVMGPUPasses(OpPassManager &modulePassManager,
   modulePassManager.addPass(createCanonicalizerPass());
   modulePassManager.addPass(createCSEPass());
 
+  modulePassManager.addPass(createLowerGenericOpsToCallsPass());
   modulePassManager.addPass(createLowerUKernelOpsToCallsPass());
 
   FunctionLikeNest(modulePassManager)

@@ -364,6 +364,12 @@ def LowerExecutableUsingTransformDialect :
   let constructor = "mlir::iree_compiler::createLowerExecutableUsingTransformDialectPass()";
 }
 
+def LowerGenericOpsToCalls :
+    Pass<"iree-codegen-lower-generic-ops-to-calls", "ModuleOp"> {
+  let summary = "Lower linalg.generic ops into function calls if they match";
+  let constructor = "mlir::iree_compiler::createLowerGenericOpsToCallsPass()";
+}
+
 def LowerUKernelOpsToCalls :
     Pass<"iree-codegen-lower-ukernel-ops-to-calls", "ModuleOp"> {
   let summary = "Lower micro-kernel wrapper ops into function calls";

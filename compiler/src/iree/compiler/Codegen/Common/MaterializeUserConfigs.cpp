@@ -195,12 +195,18 @@ static LogicalResult getMatchedUkernels(FunctionOpInterface funcOp,
         continue;
       }
       LDBG("----match!");
+      SmallVector<int64_t> tileSizes(
+          config.getAs<DenseI64ArrayAttr>("workgroup_tile_sizes").asArrayRef());
+      TileSizesListType tileSizesList = {tileSizes};
+      setLoweringConfig(genericOp, IREE::Codegen::LoweringConfigAttr::get(
+                                       genericOp.getContext(), tileSizesList));
       return genericOp;
     }
     return std::nullopt;
   };
   for (auto candidate : ukernelModule->getOps<FunctionOpInterface>()) {
-    if (!match(candidate)) {
+    std::optional<linalg::GenericOp> genericOp = match(candidate);
+    if (!genericOp) {
       continue;
     }
     ukernelOp = candidate;

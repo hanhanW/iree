@@ -216,6 +216,9 @@ createInstrumentMemoryAccessesPass();
 std::unique_ptr<OperationPass<ModuleOp>>
 createLowerExecutableUsingTransformDialectPass();
 
+/// Pass to lower linalg.generic ops into function calls if they match.
+std::unique_ptr<OperationPass<ModuleOp>> createLowerGenericOpsToCallsPass();
+
 /// Pass to lower ukernel operations into their defined function calls.
 std::unique_ptr<OperationPass<ModuleOp>> createLowerUKernelOpsToCallsPass();
 
