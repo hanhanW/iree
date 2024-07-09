@@ -71,6 +71,8 @@ void addGPUSimpleDistributePassPipeline(OpPassManager &funcPassManager);
 /// to threads.
 void addGPUTileAndFusePassPipeline(OpPassManager &funcPassManager);
 
+void addGPUMLIRUkernelPassPipeline(OpPassManager &funcPassManager);
+
 /// Transform dialect-based path.
 void addGPUTransformDialectPasses(OpPassManager &funcPassManager,
                                   StringRef entryPoint);

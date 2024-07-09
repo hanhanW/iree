@@ -17,6 +17,7 @@
 #include "mlir/Dialect/Transform/IR/TransformDialect.h"
 #include "mlir/Dialect/Transform/IR/TransformOps.h"
 #include "mlir/Dialect/Transform/Transforms/TransformInterpreterUtils.h"
+#include "mlir/IR/MLIRContext.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
 #define DEBUG_TYPE "iree-codegen-materialize-user-configs"
@@ -34,6 +35,7 @@ llvm::cl::opt<std::string> clCodegenTransformDialectLibraryFileName(
         "This is specified as <file-path>@<sequence-name>. If not specified,"
         "this will default to `__kernel_config`."),
     llvm::cl::init(""));
+
 llvm::cl::opt<std::string> clCodegenMLIRUkernelFileName(
     "iree-codegen-mlir-ukernel-file-name",
     llvm::cl::desc(
@@ -243,6 +245,7 @@ struct MaterializeUserConfigsPass
   }
 
   void runOnOperation() override {
+    MLIRContext *ctx = &getContext();
     auto moduleOp = getOperation();
     for (auto funcOp : moduleOp.getOps<FunctionOpInterface>()) {
       std::optional<ModuleOp> transformLibrary;
@@ -260,10 +263,26 @@ struct MaterializeUserConfigsPass
                              << clCodegenMLIRUkernelFileName;
           return signalPassFailure();
         }
-        if (ukernelOp && failed(injectUkernelOp(moduleOp, ukernelOp))) {
-          funcOp.emitError() << "failed to inject ukernel op: "
-                             << clCodegenMLIRUkernelFileName;
-          return signalPassFailure();
+        if (ukernelOp) {
+          if (failed(injectUkernelOp(moduleOp, ukernelOp))) {
+            funcOp.emitError() << "failed to inject ukernel op: "
+                               << clCodegenMLIRUkernelFileName;
+            return signalPassFailure();
+          }
+          auto dictAttr = DictionaryAttr::get(
+              ctx,
+              ArrayRef<NamedAttribute>({StringAttr::get(ctx, "ukernel_entry"),
+                                        ukernelOp.getNameAttr()}));
+          auto info = getTranslationInfo(ukernelOp);
+          info = IREE::Codegen::TranslationInfoAttr::get(
+              ctx,
+              IREE::Codegen::DispatchLoweringPassPipeline::LLVMGPUMLIRUkernel,
+              /*codegenSpec=*/{}, info.getWorkgroupSize(),
+              info.getSubgroupSize(), dictAttr);
+          if (failed(setTranslationInfo(funcOp, info))) {
+            funcOp.emitError() << "failed to set translation_info on funcOp";
+            return signalPassFailure();
+          }
         }
       }
 

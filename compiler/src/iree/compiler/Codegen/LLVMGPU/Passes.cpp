@@ -409,6 +409,27 @@ void addGPUWinogradVectorizePassPipeline(OpPassManager &funcPassManager) {
 }
 
 //===---------------------------------------------------------------------===//
+// MLIR-based ukernel
+//===---------------------------------------------------------------------===//
+
+void addGPUMLIRUkernelPassPipeline(OpPassManager &funcPassManager) {
+  tileAndDistributeToWorkgroup(funcPassManager);
+  funcPassManager.addPass(createCanonicalizerPass());
+  funcPassManager.addPass(createCSEPass());
+  // tensor to memref
+  addBufferizePasses(funcPassManager);
+  GPUDistributeScfForPassOptions options;
+  options.useBlockDims = false;
+  funcPassManager.addPass(createGPUDistributeScfForPass(options));
+
+  // Post bufferization optimizations.
+  funcPassManager.addPass(createLoopInvariantCodeMotionPass());
+  funcPassManager.addPass(memref::createFoldMemRefAliasOpsPass());
+  funcPassManager.addPass(createCanonicalizerPass());
+  funcPassManager.addPass(createCSEPass());
+}
+
+//===---------------------------------------------------------------------===//
 // MatmulSIMT
 //===---------------------------------------------------------------------===//
 
