@@ -14,6 +14,6 @@ func.func @main(%lhs: tensor<2048x1280xf16>, %rhs: tensor<10240x1280xf16>) -> te
 // RUN:   --compile-to=executable-targets \
 // RUN:   --mlir-disable-threading | \
 // RUN: FileCheck %s
-// TODO(hanchung): Add more checks. This is not done yet.
 // CHECK: llvm.func @matmul_transpose_b_ukernel
 // CHECK: llvm.func @main
+// CHECK: llvm.call @matmul_transpose_b_ukernel(
