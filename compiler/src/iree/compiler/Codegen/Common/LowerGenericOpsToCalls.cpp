@@ -78,10 +78,6 @@ void LowerGenericOpsToCallsPass::runOnOperation() {
     if (genericIndexingMaps != indexingMaps) {
       continue;
     }
-    SmallVector<int64_t> genericLoopRanges = genericOp.getStaticLoopRanges();
-    if (genericLoopRanges != loopRanges) {
-      continue;
-    }
     rewriter.setInsertionPointAfter(genericOp);
     rewriter.replaceOpWithNewOp<func::CallOp>(
         genericOp, cast<func::FuncOp>(ukernelFunc), genericOp.getOperands());
