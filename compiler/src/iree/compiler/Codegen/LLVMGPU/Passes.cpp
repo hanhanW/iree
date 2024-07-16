@@ -958,6 +958,7 @@ static void addLowerToLLVMGPUPasses(OpPassManager &modulePassManager,
   modulePassManager.addPass(createCSEPass());
 
   modulePassManager.addPass(createLowerGenericOpsToCallsPass());
+  modulePassManager.addPass(createInlinerPass());
   modulePassManager.addPass(createLowerUKernelOpsToCallsPass());
 
   FunctionLikeNest(modulePassManager)
