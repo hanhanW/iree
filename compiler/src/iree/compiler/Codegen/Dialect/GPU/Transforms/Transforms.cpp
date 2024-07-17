@@ -865,8 +865,9 @@ struct LowerShuffleTensor
         sourceSizes, sourceStrides);
 
     // Step 2. Synchronize the workers.
-    auto writeBarrier =
-        rewriter.create<IREE::GPU::ValueBarrierOp>(loc, insertedSlice);
+    Value writeBarrier =
+        rewriter.create<IREE::GPU::ValueBarrierOp>(loc, insertedSlice)
+            .getResult(0);
 
     auto terminator = shuffleOp.getBody()->getTerminator();
     Value replacement = terminator->getOperand(0);
@@ -874,7 +875,8 @@ struct LowerShuffleTensor
     rewriter.setInsertionPointAfterValue(replacement);
     Value barrier;
     // Step 3. Synchronize the read value.
-    barrier = rewriter.create<IREE::GPU::ValueBarrierOp>(loc, replacement);
+    barrier = rewriter.create<IREE::GPU::ValueBarrierOp>(loc, replacement)
+                  .getResult(0);
     rewriter.replaceAllUsesWith(shuffleOp.getResult(), barrier);
     rewriter.eraseOp(terminator);
     return success();
@@ -1033,7 +1035,10 @@ struct LowerValueBarrierPattern
       return failure();
     }
     rewriter.create<gpu::BarrierOp>(barrier.getLoc());
-    rewriter.replaceOp(barrier, barrier.getInput());
+    for (auto [result, input] :
+         llvm::zip_equal(barrier.getResults(), barrier.getInputs())) {
+      rewriter.replaceAllUsesWith(result, input);
+    }
     return success();
   }
 };
