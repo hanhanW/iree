@@ -608,7 +608,8 @@ static LogicalResult populateCanonicalOffsetsSizesAndStrides(
     ArrayRef<int64_t> permutation, MMAAttr::SingleSubgroupLayout subgroupLayout,
     SmallVector<OpFoldResult> &canonicalOffsets,
     SmallVector<OpFoldResult> &canonicalSizes,
-    SmallVector<OpFoldResult> &canonicalStrides) {
+    SmallVector<OpFoldResult> &canonicalStrides,
+    bool isAcc = false) {
   SmallVector<int64_t> rankReducedShape;
   for (auto [outer, thread, element] :
        llvm::zip_equal(subgroupLayout.outer, subgroupLayout.thread,
@@ -643,6 +644,10 @@ static LogicalResult populateCanonicalOffsetsSizesAndStrides(
     AffineExpr tidExpr = builder.getAffineDimExpr(0);
     AffineMap vtidMap = AffineMap::get(
         /*dims=*/1, /*syms=*/0, tidExpr.floorDiv(dimStride) % dimSize);
+    if (isAcc && vtids.empty()) {
+      vtidMap = AffineMap::get(
+          /*dims=*/1, /*syms=*/0, tidExpr.floorDiv(dimStride) * dimSize);
+    }
     Value vtid = builder.create<affine::AffineApplyOp>(loc, vtidMap, laneId);
     vtids.push_back(vtid);
   }
@@ -667,6 +672,7 @@ LogicalResult MMAAttr::populateOperandOffsetsSizesStrides(
     return failure();
   }
 
+  bool isAcc = false;
   MMAAttr::SingleSubgroupLayout subgroupLayout;
   switch (fragment) {
   case IREE::GPU::MMAFragment::Lhs: {
@@ -678,6 +684,7 @@ LogicalResult MMAAttr::populateOperandOffsetsSizesStrides(
     break;
   }
   case IREE::GPU::MMAFragment::Acc: {
+    isAcc = true;
     subgroupLayout = getCSingleSubgroupLayout();
     break;
   }
@@ -687,7 +694,7 @@ LogicalResult MMAAttr::populateOperandOffsetsSizesStrides(
   SmallVector<OpFoldResult> canonicalSizes;
   if (failed(populateCanonicalOffsetsSizesAndStrides(
           builder, loc, laneId, permutation, subgroupLayout, canonicalOffsets,
-          canonicalSizes, strides))) {
+          canonicalSizes, strides, isAcc))) {
     return failure();
   }
   offsets.append(canonicalOffsets);
