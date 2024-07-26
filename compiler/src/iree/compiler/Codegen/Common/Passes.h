@@ -265,6 +265,8 @@ createRemoveSingleIterationLoopPass();
 std::unique_ptr<InterfacePass<FunctionOpInterface>>
 createReplaceSlowMinMaxOpsPass();
 
+std::unique_ptr<OperationPass<ModuleOp>> createReplaceFuncOpPass();
+
 /// Pass to optimize vector transfer_read and transfer_write. See Passes.td for
 /// `option` details.
 std::unique_ptr<InterfacePass<FunctionOpInterface>>

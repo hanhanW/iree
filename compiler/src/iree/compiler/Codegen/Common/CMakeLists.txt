@@ -124,6 +124,7 @@ iree_cc_library(
     "ReconcileTranslationInfo.cpp"
     "RematerializeParallelOps.cpp"
     "RemoveTrivialLoops.cpp"
+    "ReplaceFuncOp.cpp"
     "ReplaceSlowMinMaxOps.cpp"
     "SplitFullPartialTransferPass.cpp"
     "TestExecutablePreprocessing.cpp"

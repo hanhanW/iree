@@ -454,6 +454,11 @@ def RemoveSingleIterationLoop :
   let constructor = "mlir::iree_compiler::createRemoveSingleIterationLoopPass()";
 }
 
+def ReplaceFuncOp : Pass<"iree-codegen-replace-func-op", "ModuleOp"> {
+  let summary = "Replace func main op if it matches the provided func op name.";
+  let constructor = "mlir::iree_compiler::createReplaceFuncOpPass()";
+}
+
 def SplitFullPartialTransfer :
     InterfacePass<"iree-codegen-split-full-partial-transfer", "mlir::FunctionOpInterface"> {
   let summary =

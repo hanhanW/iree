@@ -1087,6 +1087,7 @@ void buildLLVMGPUCodegenPassPipeline(OpPassManager &variantPassManager,
   modulePassManager.addPass(createLowerExecutableUsingTransformDialectPass());
   FunctionLikeNest(modulePassManager)
       .addPass(createLLVMGPULowerExecutableTargetPass);
+  modulePassManager.addPass(createReplaceFuncOpPass());
   variantPassManager.addPass(createReconcileTranslationInfoPass());
   //===--------------------------------------------------------------------===//
   // Convert Linalg ops to LLVM+NVVM/ROCDL ops.
