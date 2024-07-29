@@ -631,18 +631,20 @@ static LogicalResult populateCanonicalOffsetsSizesAndStrides(
 
   // vtid: virtual thread id
   // tid: lane id
-  // vtid = (tid floordiv stride_i) mod size_i.
+  // vtid = ((tid floordiv stride_i) mod size_i) * element.
   SmallVector<OpFoldResult> vtids;
-  for (auto [dimSize, dimStride] :
-       llvm::zip_equal(subgroupLayout.thread, subgroupLayout.tstrides)) {
+  for (auto [dimSize, dimStride, element] :
+       llvm::zip_equal(subgroupLayout.thread, subgroupLayout.tstrides,
+                       subgroupLayout.element)) {
     if (dimSize == 1) {
       vtids.push_back(zero);
     }
 
-    // (tid floordiv stride) mod size
+    // ((tid floordiv stride) mod size) * element.
     AffineExpr tidExpr = builder.getAffineDimExpr(0);
     AffineMap vtidMap = AffineMap::get(
-        /*dims=*/1, /*syms=*/0, tidExpr.floorDiv(dimStride) % dimSize);
+        /*dims=*/1, /*syms=*/0,
+        tidExpr.floorDiv(dimStride) % dimSize * element);
     Value vtid = builder.create<affine::AffineApplyOp>(loc, vtidMap, laneId);
     vtids.push_back(vtid);
   }
