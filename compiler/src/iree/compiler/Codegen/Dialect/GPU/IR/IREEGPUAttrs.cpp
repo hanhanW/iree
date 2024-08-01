@@ -212,6 +212,9 @@ static OpaqueMmaLayout getOpaqueMFMALayout(MLIRContext *context,
   Type i32 = IntegerType::get(context, 32);
 
   switch (type) {
+  case MMAIntrinsic::MFMA_F32_16x16x4_F32: {
+    return OpaqueMmaLayout{16, 16, 4, f32, f32, f32};
+  }
   case MMAIntrinsic::MFMA_F16_16x16x16_F32: {
     return OpaqueMmaLayout{16, 16, 16, f16, f16, f32};
   }
@@ -410,6 +413,12 @@ MMAAttr::getABCVectorTypes() const {
   // amd_matrix_instruction_calculator tells us about the number of 32-bit
   // registers. So need to adjust accordingly. All vectors should be 1-D.
   switch (getIntrinsic().getValue()) {
+  case MMAIntrinsic::MFMA_F32_16x16x4_F32: {
+    auto aType = VectorType::get({1}, getAType());
+    auto bType = VectorType::get({1}, getBType());
+    auto cType = VectorType::get({4}, getCType());
+    return std::make_tuple(aType, bType, cType);
+  }
   case MMAIntrinsic::MFMA_F16_16x16x16_F32: {
     auto aType = VectorType::get({4}, getAType());
     auto bType = VectorType::get({4}, getBType());
@@ -457,6 +466,7 @@ MMAAttr::getContractionLayout(vector::ContractionOp contract) const {
 
 int64_t MMAAttr::getBlockSize() const {
   switch (getIntrinsic().getValue()) {
+  case MMAIntrinsic::MFMA_F32_16x16x4_F32:
   case MMAIntrinsic::MFMA_F16_16x16x16_F32:
   case MMAIntrinsic::MFMA_F16_32x32x8_F32:
   case MMAIntrinsic::MFMA_F8E4M3FNUZ_16x16x32_F32:
@@ -473,6 +483,7 @@ int64_t MMAAttr::getBlockSize() const {
 
 int64_t MMAAttr::getSubgroupSize() const {
   switch (getIntrinsic().getValue()) {
+  case MMAIntrinsic::MFMA_F32_16x16x4_F32:
   case MMAIntrinsic::MFMA_F16_16x16x16_F32:
   case MMAIntrinsic::MFMA_F16_32x32x8_F32:
   case MMAIntrinsic::MFMA_F8E4M3FNUZ_16x16x32_F32:
@@ -491,6 +502,11 @@ int64_t MMAAttr::getSubgroupSize() const {
 
 MMAAttr::SingleSubgroupLayout MMAAttr::getASingleSubgroupLayout() const {
   switch (getIntrinsic().getValue()) {
+  // TODO: Fix thread and strides.
+  case MMAIntrinsic::MFMA_F32_16x16x4_F32: {
+    return {/*outer=*/{1, 1}, /*thread=*/{0, 0}, /*strides=*/{0, 0},
+            /*element=*/{1, 1}};
+  }
   case MMAIntrinsic::MFMA_F16_16x16x16_F32: {
     return {/*outer=*/{1, 1}, /*thread=*/{16, 4}, /*strides=*/{1, 16},
             /*element=*/{1, 4}};
@@ -519,6 +535,11 @@ MMAAttr::SingleSubgroupLayout MMAAttr::getASingleSubgroupLayout() const {
 
 MMAAttr::SingleSubgroupLayout MMAAttr::getBSingleSubgroupLayout() const {
   switch (getIntrinsic().getValue()) {
+  // TODO: Fix thread and strides.
+  case MMAIntrinsic::MFMA_F32_16x16x4_F32: {
+    return {/*outer=*/{1, 1}, /*thread=*/{0, 0}, /*strides=*/{0, 0},
+            /*element=*/{1, 1}};
+  }
   case MMAIntrinsic::MFMA_F16_16x16x16_F32: {
     return {/*outer=*/{1, 1}, /*thread=*/{4, 16}, /*strides=*/{16, 1},
             /*element=*/{4, 1}};
@@ -547,6 +568,11 @@ MMAAttr::SingleSubgroupLayout MMAAttr::getBSingleSubgroupLayout() const {
 
 MMAAttr::SingleSubgroupLayout MMAAttr::getCSingleSubgroupLayout() const {
   switch (getIntrinsic().getValue()) {
+  // TODO: Fix thread and strides.
+  case MMAIntrinsic::MFMA_F32_16x16x4_F32: {
+    return {/*outer=*/{1, 1}, /*thread=*/{4, 16}, /*strides=*/{16, 1},
+            /*element=*/{4, 1}};
+  }
   case MMAIntrinsic::MFMA_F16_16x16x16_F32:
   case MMAIntrinsic::MFMA_F8E4M3FNUZ_16x16x32_F32:
   case MMAIntrinsic::MFMA_I8_16x16x32_I32: {
@@ -583,6 +609,7 @@ FailureOr<Value> MMAAttr::buildMmaOperation(OpBuilder &builder, Location loc,
     return failure();
   }
   switch (getIntrinsic().getValue()) {
+  case MMAIntrinsic::MFMA_F32_16x16x4_F32:
   case MMAIntrinsic::MFMA_F16_16x16x16_F32:
   case MMAIntrinsic::MFMA_F16_32x32x8_F32:
   case MMAIntrinsic::MFMA_F8E4M3FNUZ_16x16x32_F32:

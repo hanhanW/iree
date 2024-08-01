@@ -109,6 +109,7 @@ void DistributeMmaToLanesPass::runOnOperation() {
       return signalPassFailure();
     }
   }
+  funcOp.dump();
 
   // Step 2. Distribute multi_mma ops to lanes and greedily fuse producers.
   SmallVector<IREE::GPU::MultiMmaOp> mmaOps;
