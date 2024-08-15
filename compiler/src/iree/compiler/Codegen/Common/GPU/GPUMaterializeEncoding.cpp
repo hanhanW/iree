@@ -102,9 +102,9 @@ static SmallVector<TileMxNxK> enumerateMatmulTileMxNxK(TypeRange elementTypes) {
   return {};
 }
 
-static FailureOr<MaterializeEncodingInfo>
-materializeEncodingForTarget(RankedTensorType tensorType,
-                             IREE::HAL::ExecutableTargetAttr targetAttr) {
+FailureOr<MaterializeEncodingInfo>
+gpuMaterializeEncodingForTarget(RankedTensorType tensorType,
+                                IREE::HAL::ExecutableTargetAttr targetAttr) {
   auto encoding =
       dyn_cast_or_null<IREE::Encoding::EncodingAttr>(tensorType.getEncoding());
   if (!encoding) {
@@ -307,8 +307,8 @@ void GPUMaterializeDeviceEncodingPass::runOnOperation() {
   auto targetAttr = IREE::HAL::ExecutableTargetAttr::lookup(funcOp);
   {
     RewritePatternSet patterns(ctx);
-    MaterializeEncodingTypeConverter typeConverter(materializeEncodingForTarget,
-                                                   targetAttr);
+    MaterializeEncodingTypeConverter typeConverter(
+        gpuMaterializeEncodingForTarget, targetAttr);
     MaterializeEncodingConversionTarget target(*funcOp.getContext());
     MaterializeEncodingValueFn materializeEncodingValueFn =
         [](RankedTensorType, OpBuilder,
