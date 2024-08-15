@@ -4,11 +4,21 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <optional>
+
 #include "iree/compiler/Codegen/Common/EncodingUtils.h"
 #include "iree/compiler/Codegen/Common/GPU/GPUPatterns.h"
 #include "iree/compiler/Codegen/Common/GPU/Passes.h"
-#include "llvm/ADT/SmallVector.h"
+#include "iree/compiler/Codegen/Dialect/GPU/IR/IREEGPUAttrs.h"
+#include "iree/compiler/Codegen/Dialect/GPU/IR/IREEGPUDialect.h"
+#include "iree/compiler/Codegen/Dialect/GPU/IR/IREEGPUEnums.h"
+#include "iree/compiler/Codegen/Dialect/GPU/IR/IREEGPUInterfaces.h"
+#include "iree/compiler/Codegen/Dialect/GPU/Transforms/Transforms.h"
+#include "iree/compiler/Codegen/Utils/GPUUtils.h"
+#include "iree/compiler/Dialect/Encoding/IR/EncodingDialect.h"
 #include "iree/compiler/Dialect/HAL/IR/HALTypes.h"
+#include "llvm/ADT/EnumeratedArray.h"
+#include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/MemRef/Transforms/Transforms.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Tensor/Transforms/Transforms.h"
@@ -37,14 +47,11 @@ static std::optional<TileMxNxK> getIntrinsicSize(TypeRange elementTypes) {
   return std::nullopt;
 }
 
-// TODO: Query the value from GPU attributes.
-// TODO: Define a struct with meaningful name for the pair.
-SmallVector<int64_t> getIntrinsicVectorSize(TypeRange elementTypes,
+SmallVector<int64_t> getIntrinsicVectorSize(IREE::GPU::MMAAttr mma,
                                             int64_t roleIdx) {
-  Type lhs = elementTypes[0];
-  Type rhs = elementTypes[1];
-  Type out = elementTypes[2];
-  if (lhs.isF32() && rhs.isF32() && out.isF32()) {
+  // TODO: Query the value from GPU attributes.
+  if (mma.getIntrinsic().getValue() ==
+      IREE::GPU::MMAIntrinsic::MFMA_F32_16x16x4_F32) {
     if (roleIdx == 0 || roleIdx == 1) {
       return {1, 1};
     }
@@ -57,13 +64,11 @@ SmallVector<int64_t> getIntrinsicVectorSize(TypeRange elementTypes,
 
 // Given encoding's role index and element types, return the transpose
 // permutation used in GPU materialization.
-SmallVector<int64_t> getTransposePermutation(int64_t roleIdx,
-                                             TypeRange elementTypes) {
-  // For now, check that all types are f32:
-  Type lhs = elementTypes[0];
-  Type rhs = elementTypes[1];
-  Type out = elementTypes[2];
-  if (!lhs.isF32() || !rhs.isF32() || !out.isF32()) {
+static SmallVector<int64_t> getTransposePermutation(IREE::GPU::MMAAttr mma,
+                                                    int64_t roleIdx) {
+  // TODO: Support other intrinsics.
+  if (mma.getIntrinsic().getValue() !=
+      IREE::GPU::MMAIntrinsic::MFMA_F32_16x16x4_F32) {
     return {};
   }
 
@@ -83,23 +88,29 @@ SmallVector<int64_t> getTransposePermutation(int64_t roleIdx,
   }
 }
 
-// TODO(hanchung): Pass an ExecutableTargetAttr attribute for the target
-// encoding. Here we assume that every mfma op is available.
-// TODO(hanchung): Handle wmma ops.
-static SmallVector<TileMxNxK> enumerateMatmulTileMxNxK(TypeRange elementTypes) {
+static std::optional<IREE::GPU::MMAAttr>
+enumerateMatmulIntrinsic(TypeRange elementTypes, IREE::GPU::TargetAttr target) {
+
   assert(elementTypes.size() == 3);
   Type lhs = elementTypes[0];
   Type rhs = elementTypes[1];
   Type out = elementTypes[2];
-  if (lhs.isF32() && rhs.isF32() && out.isF32()) {
-    // TODO: Take subgroup_size into account, so we can have more unrolling.
-    // TODO: Take the bitwidth of load into account, so we can have correct
-    // unrolling factor for K-dimension.
-    return {TileMxNxK{16, 16, 4}}; // Aim to use mfma_f32_16x16x4_f32 intrinsic.
+  for (IREE::GPU::MMAAttr mma : target.getWgp().getMma()) {
+    IREE::GPU::MMAIntrinsic type = mma.getIntrinsic().getValue();
+    // TODO: Drop this once all intrinsics are supported.
+    if (type != IREE::GPU::MMAIntrinsic::MFMA_F32_16x16x4_F32) {
+      continue;
+    }
+
+    auto [aType, bType, cType] = mma.getABCElementTypes();
+    if (lhs != aType || rhs != bType || out != cType) {
+      continue;
+    }
+    return mma;
   }
 
   // Fallback - no architecture-optimized tile size for this case.
-  return {};
+  return std::nullopt;
 }
 
 FailureOr<MaterializeEncodingInfo>
@@ -116,28 +127,33 @@ gpuMaterializeEncodingForTarget(RankedTensorType tensorType,
       cDims->n.size() > 1 || cDims->k.size() > 1) {
     return failure();
   }
+
+  IREE::GPU::TargetAttr gpuTargetAttr;
+  if (targetAttr) {
+    gpuTargetAttr = getGPUTargetAttr(targetAttr);
+  } else {
+    gpuTargetAttr = getCLGPUTarget(tensorType.getContext());
+  }
+
   // Enumerate available tile shapes for the given encoding and target.
   auto elementTypes = llvm::to_vector(
       llvm::map_range(encoding.getElementTypes().getValue(), [](Attribute a) {
         return cast<TypeAttr>(a).getValue();
       }));
-  SmallVector<TileMxNxK> enumeratedTileMxNxK =
-      enumerateMatmulTileMxNxK(elementTypes);
-  if (enumeratedTileMxNxK.empty()) {
-    return failure();
-  }
+  std::optional<IREE::GPU::MMAAttr> mma =
+      enumerateMatmulIntrinsic(elementTypes, gpuTargetAttr);
 
   // Map the matmul TileMxNxK to an actual tile shape for the tensor at hand,
   // based on its operand index in the matmul.
   auto rank = tensorType.getRank();
-
-  auto encodingInfo =
-      getEncodingInfoForMatmul(encoding, rank, enumeratedTileMxNxK[0]);
+  TileMxNxK innerTile;
+  std::tie(innerTile.M, innerTile.N, innerTile.K) = mma->getMNKShape();
+  auto encodingInfo = getEncodingInfoForMatmul(encoding, rank, innerTile);
 
   // insert inner tile shapes and permutation info
   auto roleIdx = encoding.getOperandIndex().getInt();
-  auto intrinsicVectorSizes = getIntrinsicVectorSize(elementTypes, roleIdx);
-  auto permutation = getTransposePermutation(roleIdx, elementTypes);
+  auto intrinsicVectorSizes = getIntrinsicVectorSize(*mma, roleIdx);
+  auto permutation = getTransposePermutation(*mma, roleIdx);
   encodingInfo.innerTileShapes = intrinsicVectorSizes;
   encodingInfo.permutation = permutation;
   return encodingInfo;
@@ -149,6 +165,11 @@ struct GPUMaterializeDeviceEncodingPass final
           GPUMaterializeDeviceEncodingPass> {
   using GPUMaterializeDeviceEncodingPassBase::
       GPUMaterializeDeviceEncodingPassBase;
+  void getDependentDialects(DialectRegistry &registry) const override {
+    registry.insert<arith::ArithDialect, tensor::TensorDialect,
+                    linalg::LinalgDialect, IREE::Encoding::IREEEncodingDialect,
+                    IREE::GPU::IREEGPUDialect>();
+  }
   void runOnOperation() override;
 };
 

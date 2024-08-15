@@ -543,8 +543,9 @@ struct CPUMaterializeHostEncodingPass
     : public impl::CPUMaterializeHostEncodingPassBase<
           CPUMaterializeHostEncodingPass> {
   void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<arith::ArithDialect, tensor::TensorDialect,
-                    IREE::Codegen::IREECodegenDialect>();
+    registry
+        .insert<arith::ArithDialect, tensor::TensorDialect,
+                IREE::Codegen::IREECodegenDialect, IREE::GPU::IREEGPUDialect>();
   }
 
   void runOnOperation() override {
@@ -603,8 +604,9 @@ struct CPUMaterializeDeviceEncodingPass
     : public impl::CPUMaterializeDeviceEncodingPassBase<
           CPUMaterializeDeviceEncodingPass> {
   void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<arith::ArithDialect, tensor::TensorDialect,
-                    IREE::Codegen::IREECodegenDialect>();
+    registry
+        .insert<arith::ArithDialect, tensor::TensorDialect,
+                IREE::Codegen::IREECodegenDialect, IREE::GPU::IREEGPUDialect>();
   }
 
   void runOnOperation() override {
