@@ -7,6 +7,7 @@
 #ifndef IREE_COMPILER_CODEGEN_COMMON_GPUPATTERNS_H_
 #define IREE_COMPILER_CODEGEN_COMMON_GPUPATTERNS_H_
 
+#include "iree/compiler/Codegen/Common/EncodingUtils.h"
 #include "mlir/IR/PatternMatch.h"
 
 namespace mlir::iree_compiler {
@@ -33,6 +34,11 @@ void populateGPUDistributionPatterns(RewritePatternSet &patterns);
 
 void populateGPUDistributionLayoutAttrPatterns(Value laneId,
                                                RewritePatternSet &patterns);
+
+void populateGPUMaterializeEncodingPatterns(
+    RewritePatternSet &patterns,
+    const MaterializeEncodingTypeConverter &typeConverter,
+    MaterializeEncodingValueFn materializeEncodingValueFn);
 
 void populateGPUReductionDistributionPatterns(RewritePatternSet &patterns,
                                               int64_t maxBitsPerShuffle = 32);

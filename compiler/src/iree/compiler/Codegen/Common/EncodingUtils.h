@@ -111,7 +111,7 @@ getEncodingInfoForMatmul(IREE::Encoding::EncodingAttr encoding, int64_t rank,
 /// as input so that these could be used with `OpConversionPatterns`.
 FailureOr<tensor::PackOp> lowerSetEncodingOpToPackOp(
     RewriterBase &rewriter, IREE::Encoding::SetEncodingOp encodingOp,
-    Value source, MaterializeEncodingFn materializeEncodingFn,
+    Value source, const MaterializeEncodingTypeConverter &typeConverter,
     MaterializeEncodingValueFn materializeEncodingValueFn);
 
 /// Utility method to convert from `unset_encoding` op to `unpack` operation.
@@ -119,7 +119,7 @@ FailureOr<tensor::PackOp> lowerSetEncodingOpToPackOp(
 /// `OpConversionPatterns`.
 FailureOr<tensor::UnPackOp> lowerUnsetEncodingToUnpackOp(
     RewriterBase &rewriter, IREE::Encoding::UnsetEncodingOp encodingOp,
-    Value packedValue, MaterializeEncodingFn materializeEncodingFn,
+    Value packedValue, const MaterializeEncodingTypeConverter &typeConverter,
     MaterializeEncodingValueFn materializeEncodingValueFn);
 
 /// Pouplates the set of patterns that lowers set_encoding, unset_encoding, and

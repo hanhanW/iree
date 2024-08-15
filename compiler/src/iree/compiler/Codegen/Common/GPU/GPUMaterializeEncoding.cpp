@@ -5,8 +5,10 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "iree/compiler/Codegen/Common/EncodingUtils.h"
+#include "iree/compiler/Codegen/Common/GPU/GPUPatterns.h"
 #include "iree/compiler/Codegen/Common/GPU/Passes.h"
 #include "llvm/ADT/SmallVector.h"
+#include "iree/compiler/Dialect/HAL/IR/HALTypes.h"
 #include "mlir/Dialect/MemRef/Transforms/Transforms.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Tensor/Transforms/Transforms.h"
@@ -101,7 +103,8 @@ static SmallVector<TileMxNxK> enumerateMatmulTileMxNxK(TypeRange elementTypes) {
 }
 
 static FailureOr<MaterializeEncodingInfo>
-materializeEncodingForTarget(RankedTensorType tensorType) {
+materializeEncodingForTarget(RankedTensorType tensorType,
+                             IREE::HAL::ExecutableTargetAttr targetAttr) {
   auto encoding =
       dyn_cast_or_null<IREE::Encoding::EncodingAttr>(tensorType.getEncoding());
   if (!encoding) {
@@ -161,12 +164,9 @@ struct GPUSetEncodingOpLoweringConversion
                   ConversionPatternRewriter &rewriter) const override {
     auto converter = static_cast<const MaterializeEncodingTypeConverter *>(
         getTypeConverter());
-    MaterializeEncodingFn materializeEncodingFn =
-        converter->getMaterializeEncodingFn();
-
-    auto packOp = lowerSetEncodingOpToPackOp(
-        rewriter, encodingOp, adaptor.getSource(), materializeEncodingFn,
-        this->materializeEncodingValueFn);
+    auto packOp = lowerSetEncodingOpToPackOp(rewriter, encodingOp,
+                                             adaptor.getSource(), *converter,
+                                             this->materializeEncodingValueFn);
     if (failed(packOp)) {
       Value result = adaptor.getSource();
       Type targetType =
@@ -180,7 +180,7 @@ struct GPUSetEncodingOpLoweringConversion
     }
 
     FailureOr<MaterializeEncodingInfo> maybeEncodingInfo =
-        materializeEncodingFn(encodingOp.getResultType());
+        converter->getEncodingInfo(encodingOp.getResultType());
     if (failed(maybeEncodingInfo)) {
       return rewriter.notifyMatchFailure(encodingOp,
                                          "unhandled result encoding");
@@ -304,19 +304,19 @@ struct GPUSetEncodingOpLoweringConversion
 void GPUMaterializeDeviceEncodingPass::runOnOperation() {
   MLIRContext *ctx = &getContext();
   FunctionOpInterface funcOp = getOperation();
+  auto targetAttr = IREE::HAL::ExecutableTargetAttr::lookup(funcOp);
   {
     RewritePatternSet patterns(ctx);
-    MaterializeEncodingTypeConverter typeConverter(
-        materializeEncodingForTarget);
+    MaterializeEncodingTypeConverter typeConverter(materializeEncodingForTarget,
+                                                   targetAttr);
     MaterializeEncodingConversionTarget target(*funcOp.getContext());
     MaterializeEncodingValueFn materializeEncodingValueFn =
         [](RankedTensorType, OpBuilder,
            Location) -> FailureOr<MaterializeEncodingValueInfo> { return {}; };
     populateIREEMaterializeEncodingIntoPackUnPackPatterns(
         patterns, target, typeConverter, materializeEncodingValueFn);
-
-    patterns.insert<GPUSetEncodingOpLoweringConversion>(
-        ctx, typeConverter, materializeEncodingValueFn);
+    populateGPUMaterializeEncodingPatterns(patterns, typeConverter,
+                                           materializeEncodingValueFn);
 
     if (failed(applyPartialConversion(funcOp, target, std::move(patterns)))) {
       funcOp.emitOpError("materialization failed");
@@ -335,6 +335,14 @@ void GPUMaterializeDeviceEncodingPass::runOnOperation() {
       return signalPassFailure();
     }
   }
+}
+
+void populateGPUMaterializeEncodingPatterns(
+    RewritePatternSet &patterns,
+    const MaterializeEncodingTypeConverter &typeConverter,
+    MaterializeEncodingValueFn materializeEncodingValueFn) {
+  patterns.insert<GPUSetEncodingOpLoweringConversion>(
+      patterns.getContext(), typeConverter, materializeEncodingValueFn);
 }
 
 } // namespace mlir::iree_compiler
