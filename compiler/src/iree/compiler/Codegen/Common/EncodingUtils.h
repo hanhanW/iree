@@ -114,6 +114,44 @@ FailureOr<tensor::PackOp> lowerSetEncodingOpToPackOp(
     Value source, const MaterializeEncodingTypeConverter &typeConverter,
     MaterializeEncodingValueFn materializeEncodingValueFn);
 
+FailureOr<Operation *>
+lowerOpWithEncoding(RewriterBase &rewriter, tensor::EmptyOp emptyOp,
+                    ValueRange convertedOperands,
+                    const MaterializeEncodingTypeConverter &typeConverter,
+                    MaterializeEncodingValueFn materializeEncodingValueFn);
+
+/// Generic pattern to convert an operation.
+template <typename OpTy>
+struct MaterializeOperation : public OpMaterializeEncodingPattern<OpTy> {
+  using OpMaterializeEncodingPattern<OpTy>::OpMaterializeEncodingPattern;
+
+  LogicalResult
+  matchAndRewrite(OpTy op, typename OpTy::Adaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto converter = static_cast<const MaterializeEncodingTypeConverter *>(
+        this->getTypeConverter());
+    FailureOr<Operation *> convertedOp =
+        lowerOpWithEncoding(rewriter, op, adaptor.getOperands(), *converter,
+                            this->materializeEncodingValueFn);
+    if (failed(convertedOp))
+      return failure();
+
+    SmallVector<Value> replacements;
+    for (auto [type, res] : llvm::zip_equal(
+             op->getResultTypes(), convertedOp.value()->getResults())) {
+      Type targetType = this->getTypeConverter()->convertType(type);
+      if (targetType == res.getType()) {
+        replacements.push_back(res);
+      } else {
+        replacements.push_back(
+            rewriter.create<tensor::CastOp>(op.getLoc(), targetType, res));
+      }
+    }
+    rewriter.replaceOp(op, replacements);
+    return success();
+  }
+};
+
 /// Utility method to convert from `unset_encoding` op to `unpack` operation.
 /// The source is taken as input so that these could be used with
 /// `OpConversionPatterns`.

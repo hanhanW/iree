@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "iree/compiler/Codegen/Common/CPU/Passes.h"
+#include "iree/compiler/Codegen/Common/GPU/Passes.h"
 #include "iree/compiler/Codegen/Common/Passes.h"
 #include "iree/compiler/Dialect/HAL/Analysis/DeviceAnalysis.h"
 #include "iree/compiler/Dialect/HAL/IR/HALDialect.h"
@@ -38,13 +39,9 @@ public:
     registry.insert<IREE::HAL::HALDialect, tensor::TensorDialect>();
   }
 
-  void runNopPipeline(ModuleOp &moduleOp) {
-    OpPassManager passManager(moduleOp.getOperationName());
+  void addNopPipeline(OpPassManager &passManager) {
     FunctionLikeNest(passManager).addPass(createMaterializeEncodingIntoNopPass);
     FunctionLikeNest(passManager).addPass(createCanonicalizerPass);
-    if (failed(runPipeline(passManager, moduleOp))) {
-      return signalPassFailure();
-    }
   }
 
   void runOnOperation() override {
@@ -55,8 +52,12 @@ public:
 
     SetVector<IREE::HAL::ExecutableTargetAttr> executableTargets;
     deviceAnalysis.gatherAllExecutableTargets(executableTargets);
+    OpPassManager passManager(moduleOp.getOperationName());
     if (executableTargets.size() != 1) {
-      return runNopPipeline(moduleOp);
+      addNopPipeline(passManager);
+      if (failed(runPipeline(passManager, moduleOp))) {
+        return signalPassFailure();
+      }
     }
 
     // TODO: vmvx has its own logic about supporting dynamic tile
@@ -67,13 +68,15 @@ public:
       return;
     }
 
-    // Only llvm-cpu backends handle encodings for now, others just go with nop.
-    if (executableTarget.getBackend() != "llvm-cpu") {
-      return runNopPipeline(moduleOp);
+    // Only llvm-cpu and rocm backends handle encodings for now, others just go
+    // with nop.
+    if (executableTarget.getBackend() == "llvm-cpu") {
+      passManager.addPass(createCPUMaterializeHostEncodingPass());
+    } else if (executableTarget.getBackend() == "rocm") {
+      passManager.addPass(createGPUMaterializeHostEncodingPass());
+    } else {
+      addNopPipeline(passManager);
     }
-
-    OpPassManager passManager(moduleOp.getOperationName());
-    passManager.addPass(createCPUMaterializeHostEncodingPass());
     if (failed(runPipeline(passManager, moduleOp))) {
       return signalPassFailure();
     }

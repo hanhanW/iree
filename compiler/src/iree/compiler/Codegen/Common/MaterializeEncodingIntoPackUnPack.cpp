@@ -337,7 +337,7 @@ static FailureOr<Operation *> lowerContractionOpWithEncoding(
 
 /// Utility method to convert `tensor.empty` with encoding to a `tensor.empty`
 /// of the materialized type.
-static FailureOr<Operation *>
+FailureOr<Operation *>
 lowerOpWithEncoding(RewriterBase &rewriter, tensor::EmptyOp emptyOp,
                     ValueRange convertedOperands,
                     const MaterializeEncodingTypeConverter &typeConverter,
@@ -834,38 +834,6 @@ struct MaterializeDPSOperation : public OpMaterializeEncodingPattern<OpTy> {
       return failure();
     }
     rewriter.replaceOp(dpsOp, convertedOp.value()->getResults());
-    return success();
-  }
-};
-
-/// Generic pattern to convert an operation.
-template <typename OpTy>
-struct MaterializeOperation : public OpMaterializeEncodingPattern<OpTy> {
-  using OpMaterializeEncodingPattern<OpTy>::OpMaterializeEncodingPattern;
-
-  LogicalResult
-  matchAndRewrite(OpTy op, typename OpTy::Adaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    auto converter = static_cast<const MaterializeEncodingTypeConverter *>(
-        this->getTypeConverter());
-    FailureOr<Operation *> convertedOp =
-        lowerOpWithEncoding(rewriter, op, adaptor.getOperands(), *converter,
-                            this->materializeEncodingValueFn);
-    if (failed(convertedOp))
-      return failure();
-
-    SmallVector<Value> replacements;
-    for (auto [type, res] : llvm::zip_equal(
-             op->getResultTypes(), convertedOp.value()->getResults())) {
-      Type targetType = this->getTypeConverter()->convertType(type);
-      if (targetType == res.getType()) {
-        replacements.push_back(res);
-      } else {
-        replacements.push_back(
-            rewriter.create<tensor::CastOp>(op.getLoc(), targetType, res));
-      }
-    }
-    rewriter.replaceOp(op, replacements);
     return success();
   }
 };
