@@ -88,18 +88,24 @@ protected:
 /// Returns the RankedTensorType without encodings.
 RankedTensorType dropEncoding(RankedTensorType type);
 
-/// Utility method to convert from `set_encoding` op to `pack` operation.
+/// Utility method to convert from `set_encoding` op to `pack` operation. The
+/// layout is derived from `layoutAttr`. `materializeEncodingValueFn` must be
+/// set if there are dynamic inner tiles.
 /// NOTE: `source` could be returned when packing is not needed.
 FailureOr<Value> lowerSetEncodingOpToPackOp(
     RewriterBase &rewriter, IREE::Encoding::SetEncodingOp encodingOp,
-    Value source, const MaterializeEncodingTypeConverter &typeConverter,
+    Value source, IREE::Codegen::LayoutAttrInterface layoutAttr,
+    bool transposeNarrowN,
     MaterializeEncodingValueFn materializeEncodingValueFn);
 
 /// Utility method to convert from `unset_encoding` op to `unpack` operation.
+/// The layout is derived from `layoutAttr`. `materializeEncodingValueFn` must
+/// be set if there are dynamic inner tiles.
 /// NOTE: `packedValue` could be returned when unpacking is not needed.
 FailureOr<Value> lowerUnsetEncodingToUnpackOp(
     RewriterBase &rewriter, IREE::Encoding::UnsetEncodingOp encodingOp,
-    Value packedValue, const MaterializeEncodingTypeConverter &typeConverter,
+    Value packedValue, IREE::Codegen::LayoutAttrInterface layoutAttr,
+    bool transposeNarrowN,
     MaterializeEncodingValueFn materializeEncodingValueFn);
 
 /// Pouplates the set of patterns that lowers set_encoding, unset_encoding, and

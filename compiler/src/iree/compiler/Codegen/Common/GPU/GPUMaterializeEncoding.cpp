@@ -97,8 +97,8 @@ struct GPUSetEncodingOpLoweringConversion
     auto converter = static_cast<const MaterializeEncodingTypeConverter *>(
         getTypeConverter());
     auto packedValue = lowerSetEncodingOpToPackOp(
-        rewriter, encodingOp, adaptor.getSource(), *converter,
-        this->materializeEncodingValueFn);
+        rewriter, encodingOp, adaptor.getSource(), converter->getLayoutAttr(),
+        converter->getTransposeNarrowN(), this->materializeEncodingValueFn);
     if (failed(packedValue)) {
       Type targetType =
           getTypeConverter()->convertType(encodingOp.getResultType());
@@ -218,8 +218,8 @@ struct GPUUnsetEncodingOpLoweringConversion
     }
 
     auto unpackedValue = lowerUnsetEncodingToUnpackOp(
-        rewriter, unsetEncodingOp, unpackSrc, *converter,
-        this->materializeEncodingValueFn);
+        rewriter, unsetEncodingOp, unpackSrc, layoutAttr,
+        converter->getTransposeNarrowN(), this->materializeEncodingValueFn);
     if (failed(unpackedValue)) {
       Type targetType =
           getTypeConverter()->convertType(unsetEncodingOp.getResultType());
