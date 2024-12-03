@@ -1292,7 +1292,7 @@ lowerContractionOpWithEncoding(OpBuilder &builder, linalg::LinalgOp linalgOp,
           IREE::Encoding::MATMUL_RESULT) {
     return failure();
   }
-  FailureOr<MaterializeEncodingInfo> encodingInfo =
+  MaterializeEncodingInfo encodingInfo =
       getEncodingInfo(cast<RankedTensorType>(linalgOp->getResultTypes()[0]));
 
   IREE::GPU::DataTiledMMAAttr mma = chooseDataTiledMMAAttr(
@@ -1348,8 +1348,7 @@ Operation *GPUEncodingLayoutAttr::lowerOp(OpBuilder &b, Operation *op,
     return nullptr;
   }
 
-  auto resolver =
-      [&](RankedTensorType type) -> FailureOr<MaterializeEncodingInfo> {
+  auto resolver = [&](RankedTensorType type) -> MaterializeEncodingInfo {
     return this->getEncodingInfo(type);
   };
   if (linalg::isaContractionOpInterface(linalgOp)) {

@@ -313,12 +313,11 @@ Operation *CPUEncodingLayoutAttr::lowerOp(OpBuilder &b, Operation *op,
     return nullptr;
   }
 
-  auto resolver =
-      [&](RankedTensorType type) -> FailureOr<MaterializeEncodingInfo> {
+  auto resolver = [&](RankedTensorType type) -> MaterializeEncodingInfo {
     return this->getEncodingInfo(type);
   };
   if (linalg::isaContractionOpInterface(linalgOp)) {
-    FailureOr<Operation *> newOp = Codegen::lowerContractionOpWithEncoding(
+    FailureOr<Operation *> newOp = Codegen::lowerContractionOpToMmt4d(
         b, linalgOp, convertedOperands, /*transposeNarrowN=*/true, resolver);
     return newOp.value_or(nullptr);
   }
@@ -412,12 +411,11 @@ Operation *VMVXEncodingLayoutAttr::lowerOp(OpBuilder &b, Operation *op,
     return nullptr;
   }
 
-  auto resolver =
-      [&](RankedTensorType type) -> FailureOr<MaterializeEncodingInfo> {
+  auto resolver = [&](RankedTensorType type) -> MaterializeEncodingInfo {
     return this->getEncodingInfo(type);
   };
   if (linalg::isaContractionOpInterface(linalgOp)) {
-    FailureOr<Operation *> newOp = Codegen::lowerContractionOpWithEncoding(
+    FailureOr<Operation *> newOp = Codegen::lowerContractionOpToMmt4d(
         b, linalgOp, convertedOperands, /*transposeNarrowN=*/true, resolver);
     return newOp.value_or(nullptr);
   }

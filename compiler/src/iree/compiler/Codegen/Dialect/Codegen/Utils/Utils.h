@@ -79,9 +79,9 @@ getEncodingInfoForMatmul(Encoding::EncodingAttr encoding, TileMxNxK tileMxNxK);
 //===----------------------------------------------------------------------===//
 
 FailureOr<Operation *>
-lowerContractionOpWithEncoding(OpBuilder &builder, linalg::LinalgOp linalgOp,
-                               ValueRange operands, bool transposeNarrowN,
-                               ResolveEncodingInfoFn getEncodingInfo);
+lowerContractionOpToMmt4d(OpBuilder &builder, linalg::LinalgOp linalgOp,
+                          ValueRange operands, bool transposeNarrowN,
+                          ResolveEncodingInfoFn getEncodingInfo);
 
 } // namespace mlir::iree_compiler::IREE::Codegen
 

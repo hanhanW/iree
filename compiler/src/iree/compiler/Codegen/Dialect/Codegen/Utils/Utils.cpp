@@ -405,9 +405,9 @@ static Value getMmt4dOperand(Value value, linalg::LinalgOp linalgOp,
 }
 
 FailureOr<Operation *>
-lowerContractionOpWithEncoding(OpBuilder &builder, linalg::LinalgOp linalgOp,
-                               ValueRange operands, bool transposeNarrowN,
-                               ResolveEncodingInfoFn getEncodingInfo) {
+lowerContractionOpToMmt4d(OpBuilder &builder, linalg::LinalgOp linalgOp,
+                          ValueRange operands, bool transposeNarrowN,
+                          ResolveEncodingInfoFn getEncodingInfo) {
   if (!linalgOp.hasPureTensorSemantics()) {
     return failure();
   }
@@ -432,13 +432,9 @@ lowerContractionOpWithEncoding(OpBuilder &builder, linalg::LinalgOp linalgOp,
     return failure();
   }
 
-  // TODO(hanchung): Remove the assertion. It is in a transition state, so the
-  // optional encoding info is returned. However, it should never fail on the
-  // path because all the users should already be migrated to layout attributes.
-  FailureOr<MaterializeEncodingInfo> encodingInfo =
+  MaterializeEncodingInfo encodingInfo =
       getEncodingInfo(cast<RankedTensorType>(linalgOp->getResultTypes()[0]));
-  assert(!failed(encodingInfo) && "should not fail");
-  if (isIdentityLayout(encodingInfo.value())) {
+  if (isIdentityLayout(encodingInfo)) {
     return dropEncodingAndCloneOp(builder, linalgOp,
                                   operands.take_front(inputs.size()),
                                   operands.drop_front(inputs.size()));
