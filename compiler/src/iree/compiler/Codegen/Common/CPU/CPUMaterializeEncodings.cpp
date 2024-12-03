@@ -43,12 +43,6 @@ using IREE::Codegen::TileMxNxK;
 #define GEN_PASS_DEF_CPUMATERIALIZEHOSTENCODINGPASS
 #include "iree/compiler/Codegen/Common/CPU/Passes.h.inc"
 
-static FailureOr<MaterializeEncodingInfo>
-materializeEncodingForTarget(RankedTensorType tensorType,
-                             IREE::HAL::ExecutableTargetAttr targetAttr) {
-  return failure();
-}
-
 static FailureOr<MaterializeEncodingValueInfo>
 chooseDynamicEncodingInfoVMVXMicrokernels(RankedTensorType tensorType,
                                           OpBuilder &builder, Location loc) {
@@ -100,9 +94,8 @@ materializeFuncOpEncodings(FunctionOpInterface funcOp,
     layoutAttr = cast<IREE::Codegen::LayoutAttrInterface>(
         IREE::Codegen::EncodingNopLayoutAttr::get(ctx));
   }
-  MaterializeEncodingTypeConverter typeConverter(
-      materializeEncodingForTarget, targetAttr, /*transposeNarrowN=*/true,
-      layoutAttr);
+  MaterializeEncodingTypeConverter typeConverter(/*transposeNarrowN=*/true,
+                                                 layoutAttr);
   MaterializeEncodingConversionTarget target(*ctx);
   auto materializeEncodingValueFn = getMaterializeEncodingValueFn(targetAttr);
   populateMaterializeEncodingIntoPackUnPackPatterns(

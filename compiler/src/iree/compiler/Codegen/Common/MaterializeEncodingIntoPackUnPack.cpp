@@ -745,8 +745,6 @@ public:
     auto converter = static_cast<const MaterializeEncodingTypeConverter *>(
         this->getTypeConverter());
     auto layoutAttr = converter->getLayoutAttr();
-    assert(layoutAttr && "layoutAttr is not set, which is not expected. Are "
-                         "you adding new arch support?");
     SmallVector<Type> convertedResTypes;
     for (auto init : op.getDpsInits()) {
       convertedResTypes.push_back(converter->convertType(init.getType()));
