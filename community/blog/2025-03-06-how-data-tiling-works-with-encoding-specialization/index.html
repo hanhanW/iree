@@ -3838,9 +3838,9 @@
 <h1 id="how-data-tiling-works-with-encoding-specialization">How data-tiling works with encoding specialization<a class="headerlink" href="#how-data-tiling-works-with-encoding-specialization" title="Permanent link">link</a></h1>
 <p>Data-tiling is a technique that transforms the input data to be in a particular
 layout for good performance. It allows you to access data through the cache
-hierarchy efficiently and do the computation with very less latency. IREE is a
-compiler which sees the whole graph. There are many opportunities to remove
-layout-transformation overheads. They may be propagated, fused into other
+hierarchy efficiently and do the computation with very less latency.</p>
+<p>IREE is a compiler which sees the whole graph. There are many opportunities to
+remove layout-transformation overheads. They may be propagated, fused into other
 operations, or be constant-evaluated for weights. IREE uses encodings to apply
 data-tiling technique, and the post explores how encodings work in data-tiling.</p>
 <!-- more -->
@@ -3880,13 +3880,14 @@ data-tiling technique, and the post explores how encodings work in data-tiling.<
 <span class="w">  </span>--iree-llvmcpu-target-cpu<span class="o">=</span>znver4<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--iree-llvmcpu-target-triple<span class="o">=</span>x86_64-unknown-linux-gnu<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--iree-global-opt-enable-early-materialization<span class="o">=</span><span class="nb">false</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--iree-stream-experimental-specialize-encodings<span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>~/matmul_f32.mlir<span class="w"> </span>-o<span class="w"> </span>~/matmul_f32.vmfb
 </code></pre></div>
 <p>Note that we have to disable the early materialization. Otherwise, the encodings
 are resolved way before specialization.</p>
 <h2 id="walkthrough">Walkthrough<a class="headerlink" href="#walkthrough" title="Permanent link">link</a></h2>
 <p>Below is the IR dump after selected data-tiling passes. For more information,
-see the <a href="https://gist.github.com/hanhanW/dc109593d4464937486b037192a2f3e4">full IR
+see the <a href="https://gist.github.com/hanhanW/216b00ebd2d5d6742ecb69af4c1acd9a">full IR
 dump</a>.</p>
 <h3 id="set-encodings">Set Encodings<a class="headerlink" href="#set-encodings" title="Permanent link">link</a></h3>
 <p>This can happen either in GlobalOptimization phase or DispatchCreation phase.
@@ -4177,11 +4178,13 @@ module attributes {stream.affinity.default = #hal.device.affinity&lt;@__device_0
 <p>The flow executables all become stream executables, and the function arguments
 become opaque types (i.e., <code>stream.binding</code> types). At the Stream level, it does
 not need to know anything about Flow.</p>
-<p>The host code is mostly about <code>stream.tensor.sizeof</code> and
-<code>stream.tensor.dispatch</code>. The <code>sizeof</code> op takes a tensor type with an optional
-encoding. It indicates the storage buffer size that will be used to issue the
-allocation later on. The <code>dispatch</code> op describes how we call the functions in
-the program.</p>
+<p>The host code is mostly composed of <code>stream.tensor.sizeof</code> and
+<code>stream.tensor.dispatch</code> ops.</p>
+<ul>
+<li>The <code>sizeof</code> op takes a tensor type with an optional encoding and indicates
+  the storage buffer size that will be used to issue the allocation later on.</li>
+<li>The <code>dispatch</code> op describes how we call the functions in the program.</li>
+</ul>
 <details><summary>IR dump after the pass</summary>
 <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">  1</span>
 <span class="normal">  2</span>
@@ -4305,7 +4308,11 @@ the program.</p>
 <span class="normal">120</span>
 <span class="normal">121</span>
 <span class="normal">122</span>
-<span class="normal">123</span></pre></div></td><td class="code"><div><pre><span></span><code>#executable_target_embedded_elf_x86_64_ = #hal.executable.target&lt;&quot;llvm-cpu&quot;, &quot;embedded-elf-x86_64&quot;, {cpu = &quot;znver4&quot;, cpu_features = &quot;+mmx,+popcnt,+sse,+sse2,+sse3,+ssse3,+sse4.1,+sse4.2,+avx,+avx2,+sse4a,+fma,+avx512f,+bmi,+bmi2,+aes,+pclmul,+avx512vl,+avx512bw,+avx512dq,+avx512cd,+avx512vbmi,+avx512ifma,+avx512vpopcntdq,+avx512vbmi2,+gfni,+vpclmulqdq,+avx512vnni,+avx512bitalg,+avx512bf16,+adx,+clflushopt,+clwb,+clzero,+cx16,+cx8,+f16c,+fsgsbase,+crc32,+invpcid,+rdpru,+sahf,+lzcnt,+movbe,+mwaitx,+x87,+pku,+evex512,+prfchw,+rdpid,+rdrnd,+rdseed,+sha,+shstk,+vaes,+wbnoinvd,+xsave,+xsavec,+xsaveopt,+xsaves,+fxsr&quot;, data_layout = &quot;e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128&quot;, iree.encoding.resolver= #iree_cpu.cpu_encoding_layout&lt;&gt;, native_vector_size = 64 : i64, target_triple = &quot;x86_64-unknown-unknown-eabi-elf&quot;}&gt;
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span></pre></div></td><td class="code"><div><pre><span></span><code>// -----// IR Dump After ConvertToStreamPass (iree-stream-conversion) //----- //
+
+#executable_target_embedded_elf_x86_64_ = #hal.executable.target&lt;&quot;llvm-cpu&quot;, &quot;embedded-elf-x86_64&quot;, {cpu = &quot;znver4&quot;, cpu_features = &quot;+mmx,+popcnt,+sse,+sse2,+sse3,+ssse3,+sse4.1,+sse4.2,+avx,+avx2,+sse4a,+fma,+avx512f,+bmi,+bmi2,+aes,+pclmul,+avx512vl,+avx512bw,+avx512dq,+avx512cd,+avx512vbmi,+avx512ifma,+avx512vpopcntdq,+avx512vbmi2,+gfni,+vpclmulqdq,+avx512vnni,+avx512bitalg,+avx512bf16,+adx,+clflushopt,+clwb,+clzero,+cx16,+cx8,+f16c,+fsgsbase,+crc32,+invpcid,+rdpru,+sahf,+lzcnt,+movbe,+mwaitx,+x87,+pku,+evex512,+prfchw,+rdpid,+rdrnd,+rdseed,+sha,+shstk,+vaes,+wbnoinvd,+xsave,+xsavec,+xsaveopt,+xsaves,+fxsr&quot;, data_layout = &quot;e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128&quot;, iree.encoding.resolver= #iree_cpu.cpu_encoding_layout&lt;&gt;, native_vector_size = 64 : i64, target_triple = &quot;x86_64-unknown-unknown-eabi-elf&quot;}&gt;
 #map = affine_map&lt;(d0, d1, d2) -&gt; (d0, d2)&gt;
 #map1 = affine_map&lt;(d0, d1, d2) -&gt; (d2, d1)&gt;
 #map2 = affine_map&lt;(d0, d1, d2) -&gt; (d0, d1)&gt;
@@ -4402,9 +4409,9 @@ module attributes {stream.affinity.default = #hal.device.affinity&lt;@__device_0
     %0 = hal.buffer_view.dim&lt;%arg0 : !hal.buffer_view&gt;[0] : index
     %1 = hal.buffer_view.dim&lt;%arg0 : !hal.buffer_view&gt;[1] : index
     %element_type_f32 = hal.element_type&lt;f32&gt; : i32
-    %dense_row_major = hal.encoding_type&lt;dense_row_major&gt; : i32
-    hal.buffer_view.assert&lt;%arg0 : !hal.buffer_view&gt; message(&quot;input0&quot;) shape([%0, %1]) type(%element_type_f32) encoding(%dense_row_major)
-<span class="hll">    %2 = stream.tensor.sizeof on(#hal.device.affinity&lt;@__device_0&gt;) tensor&lt;?x?xf32&gt;{%0, %1} : index
+<span class="hll">    %dense_row_major = hal.encoding_type&lt;dense_row_major&gt; : i32
+</span><span class="hll">    hal.buffer_view.assert&lt;%arg0 : !hal.buffer_view&gt; message(&quot;input0&quot;) shape([%0, %1]) type(%element_type_f32) encoding(%dense_row_major)
+</span><span class="hll">    %2 = stream.tensor.sizeof on(#hal.device.affinity&lt;@__device_0&gt;) tensor&lt;?x?xf32&gt;{%0, %1} : index
 </span><span class="hll">    %3 = stream.tensor.import on(#hal.device.affinity&lt;@__device_0&gt;) %arg0 : !hal.buffer_view -&gt; tensor&lt;?x?xf32&gt;{%0, %1} in !stream.resource&lt;external&gt;{%2}
 </span><span class="hll">    %4 = stream.async.transfer %3 : !stream.resource&lt;external&gt;{%2} from(#hal.device.affinity&lt;@__device_0&gt;) -&gt; to(#hal.device.affinity&lt;@__device_0&gt;) !stream.resource&lt;*&gt;{%2}
 </span><span class="hll">    %5 = hal.buffer_view.dim&lt;%arg1 : !hal.buffer_view&gt;[0] : index
@@ -4421,9 +4428,9 @@ module attributes {stream.affinity.default = #hal.device.affinity&lt;@__device_0
 </span><span class="hll">    %13 = stream.tensor.dispatch on(#hal.device.affinity&lt;@__device_0&gt;) @foo_dispatch_1::@foo_dispatch_1_set_encoding_RHS_DxD[%5, %6](%9, %5, %6) : (tensor&lt;?x?xf32&gt;{%5, %6} in !stream.resource&lt;*&gt;{%7}, index, index) -&gt; tensor&lt;?x?xf32, #encoding1&gt;{%5, %6} in !stream.resource&lt;*&gt;{%12}
 </span><span class="hll">    %14 = stream.tensor.sizeof on(#hal.device.affinity&lt;@__device_0&gt;) tensor&lt;?x?xf32, #encoding2&gt;{%0, %6} : index
 </span><span class="hll">    %15 = stream.tensor.dispatch on(#hal.device.affinity&lt;@__device_0&gt;) @foo_dispatch_2::@foo_dispatch_2_matmul_DxDxD_f32[%1, %5, %0, %6](%11, %13, %1, %5, %0, %6) : (tensor&lt;?x?xf32, #encoding&gt;{%0, %1} in !stream.resource&lt;*&gt;{%10}, tensor&lt;?x?xf32, #encoding1&gt;{%5, %6} in !stream.resource&lt;*&gt;{%12}, index, index, index, index) -&gt; tensor&lt;?x?xf32, #encoding2&gt;{%0, %6} in !stream.resource&lt;*&gt;{%14}
-</span><span class="hll">    %16 = stream.tensor.sizeof on(#hal.device.affinity&lt;@__device_0&gt;) tensor&lt;?x?xf32&gt;{%0, %6} : index
-</span><span class="hll">    %17 = stream.tensor.dispatch on(#hal.device.affinity&lt;@__device_0&gt;) @foo_dispatch_3::@foo_dispatch_3_unset_encoding_RESULT_DxD[%0, %6](%15, %0, %6) : (tensor&lt;?x?xf32, #encoding2&gt;{%0, %6} in !stream.resource&lt;*&gt;{%14}, index, index) -&gt; tensor&lt;?x?xf32&gt;{%0, %6} in !stream.resource&lt;*&gt;{%16}
-</span>    %18 = stream.async.transfer %17 : !stream.resource&lt;*&gt;{%16} from(#hal.device.affinity&lt;@__device_0&gt;) -&gt; to(#hal.device.affinity&lt;@__device_0&gt;) !stream.resource&lt;external&gt;{%16}
+</span>    %16 = stream.tensor.sizeof on(#hal.device.affinity&lt;@__device_0&gt;) tensor&lt;?x?xf32&gt;{%0, %6} : index
+    %17 = stream.tensor.dispatch on(#hal.device.affinity&lt;@__device_0&gt;) @foo_dispatch_3::@foo_dispatch_3_unset_encoding_RESULT_DxD[%0, %6](%15, %0, %6) : (tensor&lt;?x?xf32, #encoding2&gt;{%0, %6} in !stream.resource&lt;*&gt;{%14}, index, index) -&gt; tensor&lt;?x?xf32&gt;{%0, %6} in !stream.resource&lt;*&gt;{%16}
+    %18 = stream.async.transfer %17 : !stream.resource&lt;*&gt;{%16} from(#hal.device.affinity&lt;@__device_0&gt;) -&gt; to(#hal.device.affinity&lt;@__device_0&gt;) !stream.resource&lt;external&gt;{%16}
     %19 = stream.tensor.export on(#hal.device.affinity&lt;@__device_0&gt;) %18 : tensor&lt;?x?xf32&gt;{%0, %6} in !stream.resource&lt;external&gt;{%16} -&gt; !hal.buffer_view
     util.return %19 : !hal.buffer_view
   }
@@ -4442,7 +4449,7 @@ encoding layout attribute
 interface</a>.</p>
 <p>Before the specialization, only the op information is encoded. After the
 specialization, the layout is resolved into a serialized IR.  In this example,
-they are dictionary attributes representing the <a href="https://github.com/iree-org/iree/blob/d7c6c7bae479324676eb3b25234a312581d9350c/compiler/src/iree/compiler/Codegen/Dialect/Codegen/IR/IREECodegenTypes.h#L85-L96">MaterializeEncodingInfo
+that is dictionary attribute representing the <a href="https://github.com/iree-org/iree/blob/d7c6c7bae479324676eb3b25234a312581d9350c/compiler/src/iree/compiler/Codegen/Dialect/Codegen/IR/IREECodegenTypes.h#L85-L96">MaterializeEncodingInfo
 struct</a>.</p>
 <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 1</span>
 <span class="normal"> 2</span>
@@ -4716,7 +4723,11 @@ func.func @set_encoding_LHS_with_layout() attributes {
 <span class="normal">121</span>
 <span class="normal">122</span>
 <span class="normal">123</span>
-<span class="normal">124</span></pre></div></td><td class="code"><div><pre><span></span><code>#encoding = #iree_encoding.encoding&lt;operand_index = 0 : index, op_type =  matmul, element_types = [f32, f32, f32], layouts = [#iree_cpu.cpu_encoding_layout&lt;configuration = {encoding_info = {innerDimsPos = [0, 1], innerTileSizes = [16, 1], outerDimsPerm = [0, 1]}}&gt;]&gt;
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span></pre></div></td><td class="code"><div><pre><span></span><code>// -----// IR Dump After SpecializeEncodingsPass (iree-stream-specialize-encodings) //----- //
+
+#encoding = #iree_encoding.encoding&lt;operand_index = 0 : index, op_type =  matmul, element_types = [f32, f32, f32], layouts = [#iree_cpu.cpu_encoding_layout&lt;configuration = {encoding_info = {innerDimsPos = [0, 1], innerTileSizes = [16, 1], outerDimsPerm = [0, 1]}}&gt;]&gt;
 #encoding1 = #iree_encoding.encoding&lt;operand_index = 1 : index, op_type =  matmul, element_types = [f32, f32, f32], layouts = [#iree_cpu.cpu_encoding_layout&lt;configuration = {encoding_info = {innerDimsPos = [1, 0], innerTileSizes = [16, 1], outerDimsPerm = [1, 0]}}&gt;]&gt;
 #encoding2 = #iree_encoding.encoding&lt;operand_index = 2 : index, op_type =  matmul, element_types = [f32, f32, f32], layouts = [#iree_cpu.cpu_encoding_layout&lt;configuration = {encoding_info = {innerDimsPos = [0, 1], innerTileSizes = [16, 16], outerDimsPerm = [0, 1]}}&gt;]&gt;
 #executable_target_embedded_elf_x86_64_ = #hal.executable.target&lt;&quot;llvm-cpu&quot;, &quot;embedded-elf-x86_64&quot;, {cpu = &quot;znver4&quot;, cpu_features = &quot;+mmx,+popcnt,+sse,+sse2,+sse3,+ssse3,+sse4.1,+sse4.2,+avx,+avx2,+sse4a,+fma,+avx512f,+bmi,+bmi2,+aes,+pclmul,+avx512vl,+avx512bw,+avx512dq,+avx512cd,+avx512vbmi,+avx512ifma,+avx512vpopcntdq,+avx512vbmi2,+gfni,+vpclmulqdq,+avx512vnni,+avx512bitalg,+avx512bf16,+adx,+clflushopt,+clwb,+clzero,+cx16,+cx8,+f16c,+fsgsbase,+crc32,+invpcid,+rdpru,+sahf,+lzcnt,+movbe,+mwaitx,+x87,+pku,+evex512,+prfchw,+rdpid,+rdrnd,+rdseed,+sha,+shstk,+vaes,+wbnoinvd,+xsave,+xsavec,+xsaveopt,+xsaves,+fxsr&quot;, data_layout = &quot;e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128&quot;, iree.encoding.resolver= #iree_cpu.cpu_encoding_layout&lt;&gt;, native_vector_size = 64 : i64, target_triple = &quot;x86_64-unknown-unknown-eabi-elf&quot;}&gt;
@@ -4893,7 +4904,11 @@ target devices.</p>
 <span class="normal">41</span>
 <span class="normal">42</span>
 <span class="normal">43</span>
-<span class="normal">44</span></pre></div></td><td class="code"><div><pre><span></span><code>util.func public @foo(%arg0: !hal.buffer_view, %arg1: !hal.buffer_view) -&gt; !hal.buffer_view attributes {iree.abi.stub, iree.reflection = {iree.abi.declaration = &quot;sync func @foo(%input0: tensor&lt;?x?xf32&gt;, %input1: tensor&lt;?x?xf32&gt;) -&gt; (%output0: tensor&lt;?x?xf32&gt;)&quot;}} {
+<span class="normal">44</span>
+<span class="normal">45</span>
+<span class="normal">46</span></pre></div></td><td class="code"><div><pre><span></span><code>// -----// IR Dump After EncodeHostTensorsPass (iree-stream-encode-host-tensors) //----- //
+
+util.func public @foo(%arg0: !hal.buffer_view, %arg1: !hal.buffer_view) -&gt; !hal.buffer_view attributes {iree.abi.stub, iree.reflection = {iree.abi.declaration = &quot;sync func @foo(%input0: tensor&lt;?x?xf32&gt;, %input1: tensor&lt;?x?xf32&gt;) -&gt; (%output0: tensor&lt;?x?xf32&gt;)&quot;}} {
   %c0 = arith.constant 0 : index
   %c16 = arith.constant 16 : index
   %c4 = arith.constant 4 : index

@@ -3927,6 +3927,7 @@ func.func @foo(
 <div class="highlight"><pre><span></span><code>iree-compile<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--iree-execution-model<span class="o">=</span>async-external<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--iree-global-opt-enable-early-materialization<span class="o">=</span><span class="nb">false</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--iree-stream-experimental-specialize-encodings<span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>~/dt_multi_device.mlir<span class="w"> </span>-o<span class="w"> </span>~/dt_multi_device.vmfb
 </code></pre></div>
 <h2 id="walkthrough">Walkthrough<a class="headerlink" href="#walkthrough" title="Permanent link">link</a></h2>

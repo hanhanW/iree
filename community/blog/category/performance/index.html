@@ -3867,9 +3867,9 @@ specialization</a>.</p>
     <h2 id="how-data-tiling-works-with-encoding-specialization"><a class="toclink" href="../../2025-03-06-how-data-tiling-works-with-encoding-specialization/">How data-tiling works with encoding specialization</a></h2>
 <p>Data-tiling is a technique that transforms the input data to be in a particular
 layout for good performance. It allows you to access data through the cache
-hierarchy efficiently and do the computation with very less latency. IREE is a
-compiler which sees the whole graph. There are many opportunities to remove
-layout-transformation overheads. They may be propagated, fused into other
+hierarchy efficiently and do the computation with very less latency.</p>
+<p>IREE is a compiler which sees the whole graph. There are many opportunities to
+remove layout-transformation overheads. They may be propagated, fused into other
 operations, or be constant-evaluated for weights. IREE uses encodings to apply
 data-tiling technique, and the post explores how encodings work in data-tiling.</p>
 
