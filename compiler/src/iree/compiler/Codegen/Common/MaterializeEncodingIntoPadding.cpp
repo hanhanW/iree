@@ -150,12 +150,7 @@ struct MaterializeFlowDispatchTensorLoadOp final
     Value newLoad = rewriter.create<IREE::Flow::DispatchTensorLoadOp>(
         loc, adaptor.getSource(), newDynamicDims, newOffsets, newMixedSizes,
         newStrides);
-    auto extractType = RankedTensorType::get(boundTensorType.getShape(),
-                                             boundTensorType.getElementType());
-    SmallVector<OpFoldResult> extractSizes = getMixedValues(
-        boundTensorType.getShape(), loadOp.getSourceDims(), rewriter);
-    rewriter.replaceOpWithNewOp<tensor::ExtractSliceOp>(
-        loadOp, extractType, newLoad, newOffsets, extractSizes, newStrides);
+    rewriter.replaceOp(loadOp, newLoad);
     return success();
   }
 };
@@ -259,6 +254,28 @@ struct SetEncodingOpLoweringConversion
   }
 };
 
+struct UnsetEncodingOpLoweringConversion
+    : public OpMaterializeEncodingPattern<IREE::Encoding::UnsetEncodingOp> {
+  using OpMaterializeEncodingPattern<
+      IREE::Encoding::UnsetEncodingOp>::OpMaterializeEncodingPattern;
+
+  LogicalResult
+  matchAndRewrite(IREE::Encoding::UnsetEncodingOp unsetEncodingOp,
+                  OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    RankedTensorType resultType = unsetEncodingOp.getResultType();
+    int rank = resultType.getRank();
+    SmallVector<OpFoldResult> offsets(rank, rewriter.getIndexAttr(0));
+    SmallVector<OpFoldResult> strides(rank, rewriter.getIndexAttr(1));
+    SmallVector<OpFoldResult> sizes = getMixedValues(
+        resultType.getShape(), unsetEncodingOp.getResultDims(), rewriter);
+    rewriter.replaceOpWithNewOp<tensor::ExtractSliceOp>(
+        unsetEncodingOp, resultType, adaptor.getSource(), offsets, sizes,
+        strides);
+    return success();
+  }
+};
+
 struct MaterializeEncodingIntoPaddingPass final
     : impl::MaterializeEncodingIntoPaddingPassBase<
           MaterializeEncodingIntoPaddingPass> {
@@ -327,7 +344,8 @@ struct MaterializeEncodingIntoPaddingPass final
     // equivalent 'Nop' patterns.
     materializeEncodingPattern.add<MaterializeFlowDispatchTensorLoadOp,
                                    MaterializeFlowDispatchTensorStoreOp,
-                                   SetEncodingOpLoweringConversion>(
+                                   SetEncodingOpLoweringConversion,
+                                   UnsetEncodingOpLoweringConversion>(
         context, typeConverter, materializeEncodingValueFn,
         PatternBenefit{100});
 
