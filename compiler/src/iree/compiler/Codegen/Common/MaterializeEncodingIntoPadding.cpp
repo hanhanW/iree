@@ -276,6 +276,32 @@ struct UnsetEncodingOpLoweringConversion
   }
 };
 
+/// Generic pattern to convert an operation.
+template <typename OpTy>
+struct MaterializeDPSOperation : public OpMaterializeEncodingPattern<OpTy> {
+  using OpMaterializeEncodingPattern<OpTy>::OpMaterializeEncodingPattern;
+
+  LogicalResult
+  matchAndRewrite(OpTy op, typename OpTy::Adaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+
+    auto converter = static_cast<const MaterializeEncodingTypeConverter *>(
+        this->getTypeConverter());
+    IREE::Codegen::LayoutAttrInterface layoutAttr = converter->getLayoutAttr();
+    SmallVector<Value> operands;
+    operands.append(adaptor.getInputs().begin(), adaptor.getInputs().end());
+    operands.append(adaptor.getOutputs().begin(), adaptor.getOutputs().end());
+    SmallVector<Type> convertedResTypes;
+    for (auto init : op.getDpsInits()) {
+      convertedResTypes.push_back(converter->convertType(init.getType()));
+    }
+    Operation *newOp =
+        layoutAttr.lowerOp(rewriter, op, convertedResTypes, operands);
+    rewriter.replaceOp(op, newOp->getResults());
+    return success();
+  }
+};
+
 struct MaterializeEncodingIntoPaddingPass final
     : impl::MaterializeEncodingIntoPaddingPassBase<
           MaterializeEncodingIntoPaddingPass> {
@@ -344,6 +370,8 @@ struct MaterializeEncodingIntoPaddingPass final
     // equivalent 'Nop' patterns.
     materializeEncodingPattern.add<MaterializeFlowDispatchTensorLoadOp,
                                    MaterializeFlowDispatchTensorStoreOp,
+                                   MaterializeDPSOperation<linalg::FillOp>,
+                                   MaterializeDPSOperation<linalg::GenericOp>,
                                    SetEncodingOpLoweringConversion,
                                    UnsetEncodingOpLoweringConversion>(
         context, typeConverter, materializeEncodingValueFn,

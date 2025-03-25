@@ -472,26 +472,10 @@ struct GPUPadEncodingLayoutResolverAttrInterface final
 
     // Bail out on matvec / vecmat and skinny matmul problems.
     {
-      int64_t parallelDimSize = 1;
-      ArrayRef<unsigned> parallelDims =
-          (operandIndex == 0) ? contractionDims->m : contractionDims->n;
-      for (unsigned parallelDim : parallelDims) {
-        if (std::optional<unsigned> dimIdx =
-                encodingAttr.mapDimToOperandIndex(parallelDim)) {
-          int64_t dimSize = shape[*dimIdx];
-          if (ShapedType::isDynamic(dimSize)) {
-            parallelDimSize = ShapedType::kDynamic;
-            break;
-          }
-          parallelDimSize *= dimSize;
-        }
-      }
-
-      // TODO(#19897): Use `getMatmulNarrowDim`.
+      Encoding::MatmulNarrowDim narrowDim = getMatmulNarrowDim(encodingAttr);
       static constexpr int64_t kSkinnyMatmulThreshold = 64;
-      if (!ShapedType::isDynamic(parallelDimSize) &&
-          parallelDimSize < kSkinnyMatmulThreshold) {
-        // This matmul is skinny, do not pad.
+      if (!ShapedType::isDynamic(narrowDim.size) &&
+          narrowDim.size < kSkinnyMatmulThreshold) {
         return noPaddingAttr;
       }
     }
