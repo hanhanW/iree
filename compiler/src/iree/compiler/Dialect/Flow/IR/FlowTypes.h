@@ -135,7 +135,7 @@ public:
     return llvm::cast<RankedTensorType>(boundType);
   }
 
-  Type getEncodingType() const;
+  Attribute getEncoding() const;
   Type updateEncoding(Attribute encoding) const;
 };
 

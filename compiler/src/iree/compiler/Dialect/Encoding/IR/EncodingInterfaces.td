@@ -222,10 +222,10 @@ def IREEEncoding_EncodingTypeInterface :
   let methods = [
     InterfaceMethod<
       [{
-        Returns the tensor type with the encoding.
+        Returns the encoding.
       }],
-      /*retTy=*/"::mlir::Type",
-      /*methodName=*/"getEncodingType",
+      /*retTy=*/"::mlir::Attribute",
+      /*methodName=*/"getEncoding",
       /*args=*/(ins)
     >,
     InterfaceMethod<

@@ -846,25 +846,14 @@ void populateMaterializeEncodingPatterns(
     MaterializeEncodingTypeConverter &typeConverter,
     MaterializeEncodingValueFn materializeEncodingValueFn) {
   MLIRContext *context = patterns.getContext();
-  typeConverter.addConversion(
-      [&typeConverter](IREE::Flow::DispatchTensorType dispatchTensorType) {
-        Type boundType = dispatchTensorType.getBoundType();
-        Type convertedBoundType = typeConverter.convertType(boundType);
-        if (convertedBoundType == boundType) {
-          return dispatchTensorType;
-        }
-        return IREE::Flow::DispatchTensorType::get(
-            dispatchTensorType.getAccess(), convertedBoundType);
-      });
-
   target.addDynamicallyLegalOp<IREE::HAL::InterfaceBindingSubspanOp>(
-      [&typeConverter](IREE::HAL::InterfaceBindingSubspanOp subspanOp) {
-        auto resultType = llvm::dyn_cast<IREE::Flow::DispatchTensorType>(
-            subspanOp.getResult().getType());
-        // For types that are not `Flow::DispatchTensorType` mark as legal.
-        if (!resultType)
+      [](IREE::HAL::InterfaceBindingSubspanOp subspanOp) {
+        auto encodingTypeInterface =
+            dyn_cast<IREE::Encoding::EncodingTypeInterface>(
+                subspanOp.getType());
+        if (!encodingTypeInterface)
           return true;
-        return resultType == typeConverter.convertType(resultType);
+        return encodingTypeInterface.getEncoding() ? false : true;
       });
 
   patterns.insert<

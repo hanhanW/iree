@@ -77,12 +77,16 @@ struct MaterializePadEncodingTypeConverter final
       : MaterializeEncodingTypeConverter(
             IREE::Codegen::EncodingNopLayoutAttr::get(ctx)) {
     addConversion([](RankedTensorType type) -> std::optional<RankedTensorType> {
-      if (!getPadLayout(type)) {
-        // Return `nullopt` so that other conversion functions have a chance to
-        // handle this type.
-        return std::nullopt;
+      return type.dropEncoding();
+    });
+    addConversion([&](IREE::Flow::DispatchTensorType dispatchTensorType)
+                      -> IREE::Flow::DispatchTensorType {
+      RankedTensorType type = dispatchTensorType.asRankedTensorType();
+      if (getPadLayout(type)) {
+        type = getPaddedType(type);
       }
-      return getPaddedType(type);
+      return IREE::Flow::DispatchTensorType::get(dispatchTensorType.getAccess(),
+                                                 type);
     });
   }
 };
@@ -146,7 +150,7 @@ struct MaterializeFlowDispatchTensorLoadOp final
 /// materializing the encoding. We create a larger empty tensor for the
 /// destination and insert the value into it. This way we do not create partial
 /// stores prematurely, which would be difficult to undo later on.
-struct MaterializeFlowDispatchTensorStoreOp final
+struct MaterializePadFlowDispatchTensorStoreOp final
     : OpMaterializeEncodingPattern<IREE::Flow::DispatchTensorStoreOp> {
   using OpMaterializeEncodingPattern::OpMaterializeEncodingPattern;
 
@@ -168,9 +172,9 @@ struct MaterializeFlowDispatchTensorStoreOp final
 
     auto &typeConverter =
         *getTypeConverter<MaterializePadEncodingTypeConverter>();
-    auto paddedType =
-        typeConverter.convertType<RankedTensorType>(boundTensorType);
-    assert(paddedType != boundTensorType && "Expected conversion with padding");
+    IREE::Flow::DispatchTensorType newTargetType =
+        typeConverter.convertType<IREE::Flow::DispatchTensorType>(targetType);
+    RankedTensorType paddedType = newTargetType.asRankedTensorType();
 
     Location loc = storeOp.getLoc();
     SmallVector<Value> dynamicResultSizes{storeOp->getOperands()};
@@ -195,6 +199,45 @@ struct MaterializeFlowDispatchTensorStoreOp final
     rewriter.replaceOpWithNewOp<IREE::Flow::DispatchTensorStoreOp>(
         storeOp, insertOp, adaptor.getTarget(), newDynamicDims, offsets,
         newMixedSizes, strides);
+    return success();
+  }
+};
+
+struct SetPadEncodingOpLoweringConversion
+    : public OpMaterializeEncodingPattern<IREE::Encoding::SetEncodingOp> {
+  using OpMaterializeEncodingPattern<
+      IREE::Encoding::SetEncodingOp>::OpMaterializeEncodingPattern;
+
+  LogicalResult
+  matchAndRewrite(IREE::Encoding::SetEncodingOp encodingOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    rewriter.replaceOp(encodingOp, adaptor.getSource());
+    return success();
+  }
+};
+
+struct MaterializeInterfaceBindingPadEncoding
+    : public OpMaterializeEncodingPattern<
+          IREE::HAL::InterfaceBindingSubspanOp> {
+  using OpMaterializeEncodingPattern<
+      IREE::HAL::InterfaceBindingSubspanOp>::OpMaterializeEncodingPattern;
+
+  LogicalResult
+  matchAndRewrite(IREE::HAL::InterfaceBindingSubspanOp subspanOp,
+                  OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto resultType = llvm::dyn_cast<IREE::Flow::DispatchTensorType>(
+        subspanOp.getResult().getType());
+    if (!resultType) {
+      return rewriter.notifyMatchFailure(
+          subspanOp, "expected result type to be !flow.dispatch.tensor");
+    }
+    auto newResultType = getTypeConverter()->convertType(resultType);
+    SmallVector<Value> newDynamicDims = subspanOp.getDynamicDims();
+    rewriter.replaceOpWithNewOp<IREE::HAL::InterfaceBindingSubspanOp>(
+        subspanOp, newResultType, subspanOp.getLayout(), subspanOp.getBinding(),
+        subspanOp.getByteOffset(), newDynamicDims, subspanOp.getAlignmentAttr(),
+        subspanOp.getDescriptorFlagsAttr());
     return success();
   }
 };
@@ -229,7 +272,9 @@ struct MaterializeEncodingIntoPaddingPass final
     // We add custom patterns with much higher priority to run before the
     // equivalent 'Nop' patterns.
     materializeEncodingPattern.add<MaterializeFlowDispatchTensorLoadOp,
-                                   MaterializeFlowDispatchTensorStoreOp>(
+                                   MaterializePadFlowDispatchTensorStoreOp,
+                                   //SetPadEncodingOpLoweringConversion,
+                                   MaterializeInterfaceBindingPadEncoding>(
         context, typeConverter, materializeEncodingValueFn,
         PatternBenefit{100});
 
