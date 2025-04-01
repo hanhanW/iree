@@ -12,9 +12,11 @@
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/Transforms/Transforms.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "mlir/IR/Dominance.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Interfaces/FunctionInterfaces.h"
+#include "mlir/Transforms/CSE.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
 #define DEBUG_TYPE "iree-dispatch-creation-producers-into-dispatch-regions"
@@ -109,13 +111,27 @@ struct FuseEncodingOpsIntoDispatchRegionsPass
 
     // Dynamic dims may have dominance issues after pulling encoding ops into
     // producer dispatch regions, so we need to resolve tensor.dim ops.
-    RewritePatternSet patterns(context);
-    memref::populateResolveRankedShapedTypeResultDimsPatterns(patterns);
     GreedyRewriteConfig config;
     config.cseConstants = false;
-    if (failed(applyPatternsGreedily(funcOp, std::move(patterns), config))) {
-      return signalPassFailure();
+    {
+      RewritePatternSet patterns(context);
+      memref::populateResolveRankedShapedTypeResultDimsPatterns(patterns);
+      if (failed(applyPatternsGreedily(funcOp, std::move(patterns), config))) {
+        return signalPassFailure();
+      }
     }
+
+    DominanceInfo domInfo;
+    mlir::eliminateCommonSubExpressions(rewriter, domInfo, funcOp);
+    {
+      RewritePatternSet patterns(context);
+      IREE::Flow::DispatchRegionOp::getCanonicalizationPatterns(patterns,
+                                                                context);
+      if (failed(applyPatternsGreedily(funcOp, std::move(patterns), config))) {
+        return signalPassFailure();
+      }
+    }
+    mlir::eliminateCommonSubExpressions(rewriter, domInfo, funcOp);
   }
 };
 
