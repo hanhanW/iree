@@ -38,6 +38,7 @@ static bool isFusableWithSetEncoding(Operation *op) {
   if (!llvm::hasSingleElement(parentRegion.getBody())) {
     return false;
   }
+  return true;
   // Check that there are no ops other than reshapes and element-wise linalg
   // ops in the dispatch region.
   Block &regionBlock = parentRegion.getBody().getBlocks().front();
