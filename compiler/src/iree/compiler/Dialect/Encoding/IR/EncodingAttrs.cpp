@@ -12,6 +12,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Utils/ReshapeOpsUtils.h"
 #include "mlir/IR/AffineMap.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/Builders.h"
@@ -546,7 +547,22 @@ static int32_t getRoundedElementByteWidth(Type type) {
 
 PadEncodingLayoutAttr PadEncodingLayoutAttr::get(MLIRContext *ctx,
                                                  ArrayRef<int32_t> padding) {
-  return get(ctx, DenseI32ArrayAttr::get(ctx, padding));
+  return get(ctx, DenseI32ArrayAttr::get(ctx, padding), ArrayAttr());
+}
+
+PadEncodingLayoutAttr
+PadEncodingLayoutAttr::get(MLIRContext *ctx, ArrayRef<int32_t> padding,
+                           ArrayRef<ReassociationIndices> reassociation) {
+  // Replace OpBuilder with Builder for upstream
+  // getReassociationIndicesAttribute method.
+  Builder builder(ctx);
+  SmallVector<Attribute, 4> reassociationAttr =
+      llvm::to_vector<4>(llvm::map_range(
+          reassociation, [&](const ReassociationIndices &indices) -> Attribute {
+            return llvm::cast<Attribute>(builder.getI64ArrayAttr(indices));
+          }));
+  return get(ctx, builder.getDenseI32ArrayAttr(padding),
+             builder.getArrayAttr(reassociationAttr));
 }
 
 PadEncodingLayoutAttr PadEncodingLayoutAttr::getIdentityAttr(MLIRContext *ctx,

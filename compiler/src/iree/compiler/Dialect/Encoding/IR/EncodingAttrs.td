@@ -244,6 +244,7 @@ def MatmulKAttr : IREEEncoding_Attr<"MatmulK", [
 // iree_encoding.pad_encoding_layout
 //===---------------------------------------------------------------------===//
 
+// TODO(hanchung): Add verifier.
 def PadEncodingLayoutAttr : IREEEncoding_Attr<"PadEncodingLayout", [
       DeclareAttrInterfaceMethods<IREEEncoding_SerializableEncodingAttrInterface, [
          "calculateStorageSizeInBytes",
@@ -251,7 +252,7 @@ def PadEncodingLayoutAttr : IREEEncoding_Attr<"PadEncodingLayout", [
         ]>
     ]> {
   let mnemonic = "pad_encoding_layout";
-  let assemblyFormat = "`<` $padding `>`";
+  let assemblyFormat = "`<` struct(params) `>`";
 
   let summary = "An attribute that encodes padding values of tensor dimensions";
   let description = [{
@@ -266,12 +267,17 @@ def PadEncodingLayoutAttr : IREEEncoding_Attr<"PadEncodingLayout", [
   }];
 
   let parameters = (ins
-    // How many padding elements to add along each tensor dimension.
-    "DenseI32ArrayAttr":$padding
+    // How many padding elements to add along each tensor dimension after
+    // collapsing the tensor type with `reassociation` map.
+    "DenseI32ArrayAttr":$padding,
+    // The reassociation map for collapsing the tensor type before padding each
+    // dimension.
+    OptionalParameter<"ArrayAttr", "">:$reassociation
   );
 
   let builders = [
-    AttrBuilder<(ins "ArrayRef<int32_t>":$padding)>
+    AttrBuilder<(ins "ArrayRef<int32_t>":$padding)>,
+    AttrBuilder<(ins "ArrayRef<int32_t>":$padding, "ArrayRef<ReassociationIndices>":$reassociation)>
   ];
 
   let extraClassDeclaration = [{
