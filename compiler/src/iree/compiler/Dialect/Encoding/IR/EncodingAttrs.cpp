@@ -553,6 +553,10 @@ PadEncodingLayoutAttr PadEncodingLayoutAttr::get(MLIRContext *ctx,
 PadEncodingLayoutAttr
 PadEncodingLayoutAttr::get(MLIRContext *ctx, ArrayRef<int32_t> padding,
                            ArrayRef<ReassociationIndices> reassociation) {
+  if (reassociation.empty() ||
+      llvm::all_of(reassociation, [](auto v) { return v.size() == 1; })) {
+    return get(ctx, padding);
+  }
   // Replace OpBuilder with Builder for upstream
   // getReassociationIndicesAttribute method.
   Builder builder(ctx);

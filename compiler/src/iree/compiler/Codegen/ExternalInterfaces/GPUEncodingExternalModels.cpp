@@ -34,6 +34,7 @@
 #include "iree/compiler/Dialect/Encoding/IR/EncodingOps.h"
 #include "iree/compiler/Dialect/Encoding/IR/EncodingTypes.h"
 #include "llvm/Support/Debug.h"
+#include "mlir/Dialect/Arith/Utils/Utils.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 
@@ -465,17 +466,19 @@ struct GPUPadEncodingLayoutResolverAttrInterface final
     // reduction dimension.
     std::optional<SmallVector<int32_t>> reductionDims =
         contractionEncodingAttr.getReductionDims();
-    if (!reductionDims || reductionDims->size() != 1) {
+    if (!reductionDims) {
       return noPaddingAttr;
     }
 
-    int32_t padDimensionIndex = reductionDims.value()[0];
-    if (padDimensionIndex != rank - 1) {
-      return noPaddingAttr;
-    }
-    ArrayRef<int64_t> shape = type.getShape();
-    if (ShapedType::isDynamic(shape[padDimensionIndex])) {
-      return noPaddingAttr;
+    std::sort(reductionDims->begin(), reductionDims->end());
+    int64_t compareOffset = rank - reductionDims->size();
+    for (auto [idx, dim] : llvm::enumerate(reductionDims.value())) {
+      if (dim - compareOffset != idx) {
+        return noPaddingAttr;
+      }
+      if (type.hasStaticShape(dim)) {
+        return noPaddingAttr;
+      }
     }
 
     // Bail out on matvec / vecmat and skinny matmul problems.
@@ -483,6 +486,7 @@ struct GPUPadEncodingLayoutResolverAttrInterface final
       int64_t parallelDimSize = 1;
       llvm::SmallSetVector<int32_t, 4> reductionDimsSet(reductionDims->begin(),
                                                         reductionDims->end());
+      ArrayRef<int64_t> shape = type.getShape();
       for (auto [idx, dimSize] : llvm::enumerate(shape)) {
         if (reductionDimsSet.contains(idx)) {
           continue;
@@ -516,8 +520,11 @@ struct GPUPadEncodingLayoutResolverAttrInterface final
     // next 'row' will start at a different cache set.
     const int64_t cacheSetSpanBytes =
         *padLayoutAttr.getCacheSets() * cacheLineBytes;
-    const int64_t dimSizeInBytes =
-        type.getDimSize(padDimensionIndex) * (elementBits / 8);
+    int64_t dimSizeInBytes = 1;
+    for (auto padDimensionIndex : reductionDims.value()) {
+      dimSizeInBytes *= type.getDimSize(padDimensionIndex);
+    }
+    dimSizeInBytes *= (elementBits / 8);
     if (dimSizeInBytes < cacheSetSpanBytes) {
       // Very small dimension, leave as-is.
       return noPaddingAttr;
@@ -539,9 +546,16 @@ struct GPUPadEncodingLayoutResolverAttrInterface final
            "Incorrect pad amount");
     assert(padBytes < cacheSetSpanBytes && "Incorrect pad amount");
     const int64_t numPadElements = (padBytes * 8) / elementBits;
-    SmallVector<int32_t> padValues(rank, 0);
-    padValues[padDimensionIndex] = numPadElements;
-    auto padLayout = Encoding::PadEncodingLayoutAttr::get(ctx, padValues);
+    SmallVector<int32_t> padValues(compareOffset, 0);
+    padValues.push_back(numPadElements);
+    SmallVector<ReassociationIndices> reassociation;
+    for (int i = 0; i < compareOffset; ++i) {
+      reassociation.push_back({i});
+    }
+    reassociation.push_back(llvm::map_to_vector(
+        reductionDims.value(), [](int32_t v) { return static_cast<long>(v); }));
+    auto padLayout =
+        Encoding::PadEncodingLayoutAttr::get(ctx, padValues, reassociation);
     return padLayout;
   }
 };

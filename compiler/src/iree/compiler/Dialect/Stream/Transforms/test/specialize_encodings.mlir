@@ -103,6 +103,7 @@ util.func public @gpu_with_encoding_layout(%d0: index, %d1: index) -> index {
 #encodingB = #iree_encoding.encoding<operand_index = 1 : index, op_type = matmul, element_types = [f16, f16, f32], user_indexing_maps = [#map0, #map1, #map2]>
 #encodingC = #iree_encoding.encoding<operand_index = 2 : index, op_type = matmul, element_types = [f16, f16, f32], user_indexing_maps = [#map0, #map1, #map2]>
 #encodingD = #iree_encoding.encoding<operand_index = 1 : index, op_type = matmul, element_types = [f16, f16, f32], user_indexing_maps = [#map0, #map3, #map2]>
+#encodingE = #iree_encoding.matmul_k<k_dims = [1, 2]>
 
 util.global private @device_a = #device_target_local_0_
 util.func public @with_pad_encoding(%arg0: index, %arg1: index, %scalar_f32 : f32) {
@@ -118,6 +119,7 @@ util.func public @with_pad_encoding(%arg0: index, %arg1: index, %scalar_f32 : f3
   %9 = stream.tensor.empty on(#hal.device.affinity<@device_a>) : tensor<4096x4096xf16, #encodingB>{} in !stream.resource<*>{%arg1}
   %10 = stream.tensor.empty on(#hal.device.affinity<@device_a>) : tensor<4096x4096xf16, #encodingC>{} in !stream.resource<*>{%arg1}
   %11 = stream.tensor.empty on(#hal.device.affinity<@device_a>) : tensor<4096x4096xf16, #encodingD>{} in !stream.resource<*>{%arg1}
+  %12 = stream.tensor.empty on(#hal.device.affinity<@device_a>) : tensor<?x4096x4096xf16, #encodingE>{%arg0} in !stream.resource<*>{%arg1}
   util.return
 }
 
@@ -125,6 +127,7 @@ util.func public @with_pad_encoding(%arg0: index, %arg1: index, %scalar_f32 : f3
 // CHECK-DAG: #[[$PAD_DIM1_64:.+]] =  #iree_encoding.layout<[#iree_encoding.pad_encoding_layout<padding = [0, 64]>]
 // CHECK-DAG: #[[$PAD_LHS_1:.+]] =  #iree_encoding.layout<[#iree_encoding.pad_encoding_layout<padding = [0, 7]>]
 // CHECK-DAG: #[[$PAD_LHS_2:.+]] =  #iree_encoding.layout<[#iree_encoding.pad_encoding_layout<padding = [0, 65]>]
+// CHECK-DAG: #[[$PAD_MULTI_RED:.+]] =  #iree_encoding.layout<[#iree_encoding.pad_encoding_layout<padding = [0, 64], reassociation = {{\[}}[0], [1, 2]]>]
 
 // CHECK-LABEL: util.func public @with_pad_encoding
 //
@@ -140,6 +143,7 @@ util.func public @with_pad_encoding(%arg0: index, %arg1: index, %scalar_f32 : f3
 // CHECK: stream.tensor.empty {{.*}} : tensor<4096x4096xf16, #[[$PAD_DIM1_64]]>
 // CHECK: stream.tensor.empty {{.*}} : tensor<4096x4096xf16, #[[$NO_PAD]]>
 // CHECK: stream.tensor.empty {{.*}} : tensor<4096x4096xf16, #[[$PAD_DIM1_64]]>
+// CHECK: stream.tensor.empty {{.*}} : tensor<?x4096x4096xf16, #[[$PAD_MULTI_RED]]>
 //
 // CHECK-NEXT: util.return
 
