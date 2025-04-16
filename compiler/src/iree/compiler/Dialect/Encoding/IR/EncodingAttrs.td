@@ -283,6 +283,10 @@ def PadEncodingLayoutAttr : IREEEncoding_Attr<"PadEncodingLayout", [
   let extraClassDeclaration = [{
     /// Returns a PadEncodingLayoutAttr attribute that pads zero elements.
     static PadEncodingLayoutAttr getIdentityAttr(MLIRContext *ctx, int rank);
+
+    SmallVector<ReassociationIndices> getReassociationIndices();
+
+    SmallVector<int64_t> getCollapsedShapeWithoutPadding(ArrayRef<int64_t> shape);
   }];
 }
 

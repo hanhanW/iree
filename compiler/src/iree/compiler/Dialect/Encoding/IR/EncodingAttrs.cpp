@@ -575,6 +575,44 @@ PadEncodingLayoutAttr PadEncodingLayoutAttr::getIdentityAttr(MLIRContext *ctx,
   return get(ctx, zeros);
 }
 
+SmallVector<ReassociationIndices>
+PadEncodingLayoutAttr::getReassociationIndices() {
+  SmallVector<ReassociationIndices> reassociationIndices;
+  auto reassociationAttr = getReassociation();
+
+  // Construct the identity reassociation map if the attribute is not set.
+  if (!reassociationAttr) {
+    for (auto i : llvm::seq<int64_t>(0, getPadding().size())) {
+      reassociationIndices.push_back({i});
+    }
+    return reassociationIndices;
+  }
+
+  for (auto attr : reassociationAttr) {
+    reassociationIndices.push_back(llvm::to_vector<2>(llvm::map_range(
+        ::llvm::cast<ArrayAttr>(attr), [&](Attribute indexAttr) {
+          return ::llvm::cast<IntegerAttr>(indexAttr).getInt();
+        })));
+  }
+  return reassociationIndices;
+}
+
+SmallVector<int64_t> PadEncodingLayoutAttr::getCollapsedShapeWithoutPadding(
+    ArrayRef<int64_t> shape) {
+  SmallVector<ReassociationIndices> reassociations = getReassociationIndices();
+  SmallVector<int64_t> newShape(reassociations.size(), 1);
+  for (auto [i, indices] : llvm::enumerate(reassociations)) {
+    for (auto j : indices) {
+      if (ShapedType::isDynamic(shape[j])) {
+        newShape[i] = ShapedType::kDynamic;
+        break;
+      }
+      newShape[i] *= shape[j];
+    }
+  }
+  return newShape;
+}
+
 bool PadEncodingLayoutAttr::isIdentityLayout() const {
   ArrayRef<int32_t> padding = getPadding().asArrayRef();
   return llvm::all_of(padding, [](int32_t val) { return val == 0; });

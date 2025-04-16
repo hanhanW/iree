@@ -18,10 +18,15 @@
 #include "iree/compiler/Dialect/Flow/IR/FlowTypes.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Debug.h"
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/Arith/Utils/Utils.h"
 #include "mlir/Dialect/MemRef/Transforms/Transforms.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/OpDefinition.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
@@ -74,14 +79,20 @@ static RankedTensorType getPaddedType(Attribute layoutAttr,
     return type.dropEncoding();
   }
 
+  SmallVector<int64_t> newShape =
+      layout.getCollapsedShapeWithoutPadding(type.getShape());
+  llvm::dbgs() << type << "\n";
+  llvm::dbgs() << "newShape: ";
+  for (auto i : newShape) {
+    llvm::dbgs() << i << " ";
+  }
+  llvm::dbgs() << "\n";
   ArrayRef<int32_t> padding = layout.getPadding().asArrayRef();
-  auto newShape = llvm::to_vector_of<int64_t>(type.getShape());
   for (auto [newDim, padValue] : llvm::zip_equal(newShape, padding)) {
     assert((padValue == 0 || !ShapedType::isDynamic(newDim)) &&
            "Padding dynamic dims not supported");
     newDim += padValue;
   }
-
   return RankedTensorType::get(newShape, type.getElementType());
 }
 
@@ -90,7 +101,12 @@ struct MaterializePadEncodingTypeConverter final
   MaterializePadEncodingTypeConverter(
       IREE::Codegen::LayoutAttrInterface layoutAttr)
       : MaterializeEncodingTypeConverter(layoutAttr) {
-    addConversion([](RankedTensorType type) -> std::optional<RankedTensorType> {
+    addConversion([&](RankedTensorType type) -> RankedTensorType {
+      if (auto padLayout = getPadLayout(getLayoutAttr(), type)) {
+        return RankedTensorType::get(
+            padLayout.getCollapsedShapeWithoutPadding(type.getShape()),
+            type.getElementType());
+      }
       // The type converter is designed for `pad_encoding_layout` encoding
       // attribute. By the definition, the final converted type is the same
       // tensor type without encodings.
@@ -118,6 +134,49 @@ struct MaterializePadEncodingTypeConverter final
   }
 };
 
+static FailureOr<SmallVector<OpFoldResult>> getPaddedDimsForDispatchTensor(
+    OpBuilder &builder, Location loc,
+    const MaterializePadEncodingTypeConverter &typeConverter,
+    IREE::Flow::DispatchTensorType dispatchTensorType, ValueRange dynamicDims) {
+  auto type = cast<RankedTensorType>(dispatchTensorType.getBoundType());
+  PadEncodingLayoutAttr layout =
+      getPadLayout(typeConverter.getLayoutAttr(), type);
+  if (!layout || layout.isIdentityLayout()) {
+    return failure();
+  }
+
+  auto paddedType = typeConverter.convertType<RankedTensorType>(type);
+  assert(paddedType != type && "Expected conversion with padding");
+  SmallVector<OpFoldResult> mixedSizes =
+      getMixedValues(type.getShape(), dynamicDims, builder);
+
+  SmallVector<ReassociationIndices> reassociations =
+      layout.getReassociationIndices();
+  SmallVector<OpFoldResult> newMixedSizes(reassociations.size());
+  auto d0 = builder.getAffineDimExpr(0);
+  auto d1 = builder.getAffineDimExpr(1);
+  for (auto [i, indices] : llvm::enumerate(reassociations)) {
+    for (auto j : indices) {
+      if (!newMixedSizes[i]) {
+        newMixedSizes[i] = mixedSizes[j];
+      } else {
+        newMixedSizes[i] = affine::makeComposedFoldedAffineApply(
+            builder, loc, {d0 * d1}, {newMixedSizes[i], mixedSizes[j]});
+      }
+    }
+  }
+
+  ArrayRef<int32_t> padding = layout.getPadding().asArrayRef();
+  for (auto [newDim, padValue] : llvm::zip_equal(newMixedSizes, padding)) {
+    if (!padValue) {
+      continue;
+    }
+    newDim = affine::makeComposedFoldedAffineApply(
+        builder, loc, {d0 + d1}, {newDim, builder.getIndexAttr(padValue)});
+  }
+  return newMixedSizes;
+}
+
 /// Pattern to convert `flow.dispatch.tensor.load` operation when
 /// materializing the encoding. We extract a smaller tensor for the padded
 /// source. This way we do not create partial loads prematurely, which would be
@@ -138,19 +197,16 @@ struct MaterializeFlowDispatchTensorLoadOp final
     auto &typeConverter =
         *getTypeConverter<MaterializePadEncodingTypeConverter>();
     IREE::Flow::DispatchTensorType sourceType = loadOp.getSourceType();
-    auto boundTensorType = cast<RankedTensorType>(sourceType.getBoundType());
-    if (!typeConverter.hasNonZeroPadding(boundTensorType)) {
-      // Let the Nop pattern handle this.
-      return rewriter.notifyMatchFailure(loadOp, "no padding applied");
+    FailureOr<SmallVector<OpFoldResult>> maybeMixedSizes =
+        getPaddedDimsForDispatchTensor(rewriter, loadOp.getLoc(), typeConverter,
+                                       sourceType, loadOp.getSourceDims());
+    if (failed(maybeMixedSizes)) {
+      return rewriter.notifyMatchFailure(
+          loadOp, "failed to get dim sizes for the padded type");
     }
 
-    auto paddedType =
-        typeConverter.convertType<RankedTensorType>(boundTensorType);
-    assert(paddedType != boundTensorType && "Expected conversion with padding");
-
     SmallVector<OpFoldResult> newMixedSizes =
-        getMixedValues(paddedType.getShape(), loadOp.getSourceDims(), rewriter);
-
+        std::move(maybeMixedSizes.value());
     SmallVector<OpFoldResult> newOffsets(newMixedSizes.size(),
                                          rewriter.getIndexAttr(0));
     SmallVector<OpFoldResult> newStrides(newMixedSizes.size(),
@@ -158,17 +214,29 @@ struct MaterializeFlowDispatchTensorLoadOp final
     SmallVector<int64_t> newStaticDims;
     SmallVector<Value> newDynamicDims;
     dispatchIndexOpFoldResults(newMixedSizes, newDynamicDims, newStaticDims);
+  for (auto i : newMixedSizes) llvm::dbgs() << i << "\n";
+
 
     Location loc = loadOp.getLoc();
     Value newLoad = rewriter.create<IREE::Flow::DispatchTensorLoadOp>(
         loc, adaptor.getSource(), newDynamicDims, newOffsets, newMixedSizes,
         newStrides);
-    auto extractType = RankedTensorType::get(boundTensorType.getShape(),
-                                             boundTensorType.getElementType());
+    auto boundTensorType = cast<RankedTensorType>(sourceType.getBoundType());
+    PadEncodingLayoutAttr layout =
+        getPadLayout(typeConverter.getLayoutAttr(), boundTensorType);
+    assert(layout && "expect a pad layout attribute");
+    auto extractType = RankedTensorType::get(
+        layout.getCollapsedShapeWithoutPadding(boundTensorType.getShape()),
+        boundTensorType.getElementType());
     SmallVector<OpFoldResult> extractSizes = getMixedValues(
         boundTensorType.getShape(), loadOp.getSourceDims(), rewriter);
-    rewriter.replaceOpWithNewOp<tensor::ExtractSliceOp>(
-        loadOp, extractType, newLoad, newOffsets, extractSizes, newStrides);
+    auto loadValue = rewriter.create<tensor::ExtractSliceOp>(
+        loc, extractType, newLoad, newOffsets, extractSizes, newStrides);
+    SmallVector<OpFoldResult> origMixedSizes = loadOp.getMixedSizes();
+    auto expandOp = rewriter.create<tensor::ExpandShapeOp>(
+        loc, boundTensorType.dropEncoding(), loadValue,
+        layout.getReassociationIndices(), origMixedSizes);
+    rewriter.replaceOp(loadOp, expandOp);
     return success();
   }
 };
