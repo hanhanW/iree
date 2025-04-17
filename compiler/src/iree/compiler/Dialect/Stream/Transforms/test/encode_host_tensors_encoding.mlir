@@ -226,3 +226,16 @@ util.func public @sizeof_multi_encoding_layouts(%arg0: index, %arg1: index) -> i
 // CHECK-DAG:     %[[RES_0_1:.+]] = arith.maxui %[[SIZE0]], %[[SIZE1]]
 // CHECK-DAG:     %[[RES:.+]] = arith.maxui %[[RES_0_1]], %[[SIZE2]]
 // CHECK:         return %[[RES]]
+
+// -----
+
+#encoding = #iree_encoding.layout<[#iree_encoding.pad_encoding_layout<padding = [0, 0, 0, 64], reassociation = [[0], [1], [2], [3, 4, 5]]>]>
+util.func public @pad_encoding_with_reassociation(%arg0: index) -> index {
+  %0 = stream.tensor.sizeof tensor<4x?x32x8x4x128xf16, #encoding>{%arg0} : index
+  util.return %0 : index
+}
+// CHECK-LABEL: @pad_encoding_with_reassociation
+// CHECK-SAME:    %[[ARG0:[a-zA-Z0-9]]]
+// CHECK:         %[[STATIC_SIZE:.+]] = arith.constant 1064960 : index
+// CHECK:         %[[RES:.+]] = arith.muli %arg0, %[[STATIC_SIZE]] overflow<nsw> : index
+// CHECK:         return %[[RES]]

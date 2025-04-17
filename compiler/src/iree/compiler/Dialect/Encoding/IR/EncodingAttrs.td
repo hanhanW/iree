@@ -284,9 +284,9 @@ def PadEncodingLayoutAttr : IREEEncoding_Attr<"PadEncodingLayout", [
     /// Returns a PadEncodingLayoutAttr attribute that pads zero elements.
     static PadEncodingLayoutAttr getIdentityAttr(MLIRContext *ctx, int rank);
 
-    SmallVector<ReassociationIndices> getReassociationIndices();
+    SmallVector<ReassociationIndices> getReassociationIndices() const;
 
-    SmallVector<int64_t> getCollapsedShapeWithoutPadding(ArrayRef<int64_t> shape);
+    SmallVector<int64_t> getCollapsedShapeWithoutPadding(ArrayRef<int64_t> shape) const;
   }];
 }
 

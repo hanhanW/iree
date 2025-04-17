@@ -576,7 +576,7 @@ PadEncodingLayoutAttr PadEncodingLayoutAttr::getIdentityAttr(MLIRContext *ctx,
 }
 
 SmallVector<ReassociationIndices>
-PadEncodingLayoutAttr::getReassociationIndices() {
+PadEncodingLayoutAttr::getReassociationIndices() const {
   SmallVector<ReassociationIndices> reassociationIndices;
   auto reassociationAttr = getReassociation();
 
@@ -598,7 +598,7 @@ PadEncodingLayoutAttr::getReassociationIndices() {
 }
 
 SmallVector<int64_t> PadEncodingLayoutAttr::getCollapsedShapeWithoutPadding(
-    ArrayRef<int64_t> shape) {
+    ArrayRef<int64_t> shape) const {
   SmallVector<ReassociationIndices> reassociations = getReassociationIndices();
   SmallVector<int64_t> newShape(reassociations.size(), 1);
   for (auto [i, indices] : llvm::enumerate(reassociations)) {
@@ -621,8 +621,10 @@ bool PadEncodingLayoutAttr::isIdentityLayout() const {
 Value PadEncodingLayoutAttr::calculateStorageSizeInBytes(
     Location loc, OpBuilder &builder, RankedTensorType type,
     ValueRange dynamicDims) const {
+  SmallVector<int64_t> collapsedShape =
+      getCollapsedShapeWithoutPadding(type.getShape());
   ArrayRef<int32_t> padding = getPadding().asArrayRef();
-  assert(padding.size() == type.getRank() && "Invalid padding");
+  assert(padding.size() == collapsedShape.size() && "Invalid padding");
   LLVM_DEBUG(if (llvm::any_of(padding, [](int32_t x) { return x != 0; })) {
     llvm::dbgs() << "Non-zero padding: " << type << "\n";
   });
@@ -632,7 +634,7 @@ Value PadEncodingLayoutAttr::calculateStorageSizeInBytes(
   Value dynamicProduct = builder.create<arith::ConstantIndexOp>(loc, 1);
 
   size_t dynamicDimIdx = 0;
-  for (auto [dimSize, padValue] : llvm::zip_equal(type.getShape(), padding)) {
+  for (auto [dimSize, padValue] : llvm::zip_equal(collapsedShape, padding)) {
     if (!ShapedType::isDynamic(dimSize)) {
       staticProduct *= (dimSize + padValue);
       continue;
