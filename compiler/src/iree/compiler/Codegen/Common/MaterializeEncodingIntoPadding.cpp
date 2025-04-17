@@ -102,11 +102,13 @@ struct MaterializePadEncodingTypeConverter final
       IREE::Codegen::LayoutAttrInterface layoutAttr)
       : MaterializeEncodingTypeConverter(layoutAttr) {
     addConversion([&](RankedTensorType type) -> RankedTensorType {
+#if 0
       if (auto padLayout = getPadLayout(getLayoutAttr(), type)) {
         return RankedTensorType::get(
             padLayout.getCollapsedShapeWithoutPadding(type.getShape()),
             type.getElementType());
       }
+#endif
       // The type converter is designed for `pad_encoding_layout` encoding
       // attribute. By the definition, the final converted type is the same
       // tensor type without encodings.
@@ -165,7 +167,7 @@ static FailureOr<SmallVector<OpFoldResult>> getPaddedDimsForDispatchTensor(
       }
     }
   }
-
+#if 0
   ArrayRef<int32_t> padding = layout.getPadding().asArrayRef();
   for (auto [newDim, padValue] : llvm::zip_equal(newMixedSizes, padding)) {
     if (!padValue) {
@@ -174,6 +176,7 @@ static FailureOr<SmallVector<OpFoldResult>> getPaddedDimsForDispatchTensor(
     newDim = affine::makeComposedFoldedAffineApply(
         builder, loc, {d0 + d1}, {newDim, builder.getIndexAttr(padValue)});
   }
+#endif
   return newMixedSizes;
 }
 
@@ -214,8 +217,6 @@ struct MaterializeFlowDispatchTensorLoadOp final
     SmallVector<int64_t> newStaticDims;
     SmallVector<Value> newDynamicDims;
     dispatchIndexOpFoldResults(newMixedSizes, newDynamicDims, newStaticDims);
-  for (auto i : newMixedSizes) llvm::dbgs() << i << "\n";
-
 
     Location loc = loadOp.getLoc();
     Value newLoad = rewriter.create<IREE::Flow::DispatchTensorLoadOp>(
@@ -225,6 +226,7 @@ struct MaterializeFlowDispatchTensorLoadOp final
     PadEncodingLayoutAttr layout =
         getPadLayout(typeConverter.getLayoutAttr(), boundTensorType);
     assert(layout && "expect a pad layout attribute");
+#if 0
     auto extractType = RankedTensorType::get(
         layout.getCollapsedShapeWithoutPadding(boundTensorType.getShape()),
         boundTensorType.getElementType());
@@ -237,6 +239,13 @@ struct MaterializeFlowDispatchTensorLoadOp final
         loc, boundTensorType.dropEncoding(), loadValue,
         layout.getReassociationIndices(), origMixedSizes);
     rewriter.replaceOp(loadOp, expandOp);
+#else
+    SmallVector<OpFoldResult> origMixedSizes = loadOp.getMixedSizes();
+    auto expandOp = rewriter.create<tensor::ExpandShapeOp>(
+        loc, boundTensorType.dropEncoding(), newLoad,
+        layout.getReassociationIndices(), origMixedSizes);
+    rewriter.replaceOp(loadOp, expandOp);
+#endif
     return success();
   }
 };
@@ -267,11 +276,11 @@ struct MaterializeFlowDispatchTensorStoreOp final
       return rewriter.notifyMatchFailure(storeOp, "no padding applied");
     }
 
+    Location loc = storeOp.getLoc();
+#if 0
     IREE::Flow::DispatchTensorType newTargetType =
         typeConverter.convertType<IREE::Flow::DispatchTensorType>(targetType);
     RankedTensorType paddedType = newTargetType.asRankedTensorType();
-
-    Location loc = storeOp.getLoc();
     SmallVector<Value> dynamicResultSizes{storeOp->getOperands()};
     Value empty =
         rewriter.create<tensor::EmptyOp>(loc, paddedType, dynamicResultSizes);
@@ -294,6 +303,30 @@ struct MaterializeFlowDispatchTensorStoreOp final
     rewriter.replaceOpWithNewOp<IREE::Flow::DispatchTensorStoreOp>(
         storeOp, insertOp, adaptor.getTarget(), newDynamicDims, offsets,
         newMixedSizes, strides);
+#else
+    FailureOr<SmallVector<OpFoldResult>> maybeMixedSizes =
+        getPaddedDimsForDispatchTensor(rewriter, loc, typeConverter, targetType,
+                                       storeOp.getTargetDims());
+    SmallVector<OpFoldResult> newMixedSizes =
+        std::move(maybeMixedSizes.value());
+    SmallVector<OpFoldResult> offsets(newMixedSizes.size(),
+                                      rewriter.getIndexAttr(0));
+    SmallVector<OpFoldResult> strides(newMixedSizes.size(),
+                                      rewriter.getIndexAttr(1));
+    SmallVector<int64_t> newStaticDims;
+    SmallVector<Value> newDynamicDims;
+    dispatchIndexOpFoldResults(newMixedSizes, newDynamicDims, newStaticDims);
+
+    PadEncodingLayoutAttr layout =
+        getPadLayout(typeConverter.getLayoutAttr(), boundTensorType);
+    assert(layout && "expect a pad layout attribute");
+    auto collapsedOp = rewriter.create<tensor::CollapseShapeOp>(
+        loc, adaptor.getValue(), layout.getReassociationIndices());
+    auto newStore = rewriter.create<IREE::Flow::DispatchTensorStoreOp>(
+        loc, collapsedOp, adaptor.getTarget(), newDynamicDims, offsets,
+        newMixedSizes, strides);
+    rewriter.replaceOp(storeOp, newStore);
+#endif
     return success();
   }
 };

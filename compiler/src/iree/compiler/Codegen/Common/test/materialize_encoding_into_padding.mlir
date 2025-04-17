@@ -284,6 +284,43 @@ func.func @set_pad_encoding_and_store_with_resolved_layout() {
 
 // -----
 
+#encoding = #iree_encoding.matmul_k<k_dims = [1, 2]>
+#resolved_encoding = #iree_encoding.layout<[#iree_encoding.pad_encoding_layout<padding = [0, 64], reassociation = [[0], [1, 2]]>]>
+#map = affine_map<(d0, d1, d2) -> (d0, d1, d2)>
+#pipeline_layout = #hal.pipeline.layout<constants = 1, bindings = [#hal.pipeline.binding<storage_buffer, "ReadOnly|Indirect">, #hal.pipeline.binding<storage_buffer, Indirect>], flags = Indirect>
+func.func @multi_reduction_encoding_for_load_elementwise_store() {
+  %c0 = arith.constant 0 : index
+  %0 = hal.interface.constant.load layout(#pipeline_layout) ordinal(0) : i32
+  %1 = arith.index_castui %0 : i32 to index
+  %2 = hal.interface.binding.subspan layout(#pipeline_layout) binding(0) alignment(64) offset(%1) flags("ReadOnly|Indirect") : !flow.dispatch.tensor<readonly:tensor<123x129x255xf32, #resolved_encoding>>
+  %3 = hal.interface.binding.subspan layout(#pipeline_layout) binding(1) alignment(64) offset(%c0) flags(Indirect) : !flow.dispatch.tensor<writeonly:tensor<123x129x255xf32, #resolved_encoding>>
+  %4 = flow.dispatch.tensor.load %2, offsets = [0, 0, 0], sizes = [123, 129, 255], strides = [1, 1, 1] : !flow.dispatch.tensor<readonly:tensor<123x129x255xf32, #resolved_encoding>> -> tensor<123x129x255xf32, #encoding>
+  %5 = tensor.empty() : tensor<123x129x255xf32, #encoding>
+  %6 = linalg.generic {indexing_maps = [#map, #map, #map], iterator_types = ["parallel", "parallel", "parallel"]} ins(%4, %4 : tensor<123x129x255xf32, #encoding>, tensor<123x129x255xf32, #encoding>) outs(%5 : tensor<123x129x255xf32, #encoding>) {
+  ^bb0(%in: f32, %in_0: f32, %out: f32):
+    %7 = arith.addf %in, %in_0 : f32
+    linalg.yield %7 : f32
+  } -> tensor<123x129x255xf32, #encoding>
+  flow.dispatch.tensor.store %6, %3, offsets = [0, 0, 0], sizes = [123, 129, 255], strides = [1, 1, 1] : tensor<123x129x255xf32, #encoding> -> !flow.dispatch.tensor<writeonly:tensor<123x129x255xf32, #resolved_encoding>>
+  return
+}
+// CHECK-LABEL: @multi_reduction_encoding_for_load_elementwise_store
+// CHECK-DAG:     %[[IN_BINDING:.+]] = hal.interface.binding.subspan {{.+}} : !flow.dispatch.tensor<readonly:tensor<123x32959xf32>>
+// CHECK-DAG:     %[[OUT_BINDING:.+]] = hal.interface.binding.subspan {{.+}} : !flow.dispatch.tensor<writeonly:tensor<123x32959xf32>>
+// CHECK:         %[[IN:.+]] = flow.dispatch.tensor.load %[[IN_BINDING]]
+// CHECK-SAME:      offsets = [0, 0], sizes = [123, 32895], strides = [1, 1]
+// CHECK-SAME:      : !flow.dispatch.tensor<readonly:tensor<123x32959xf32>> -> tensor<123x32895xf32>
+// CHECK:         %[[EXPANDED:.+]] = tensor.expand_shape %[[IN]] {{\[}}[0], [1, 2]] output_shape [123, 129, 255]
+// CHECK-SAME:      : tensor<123x32895xf32> into tensor<123x129x255xf32>
+// CHECK:         %[[RES:.+]] = linalg.generic
+// CHECK-SAME:      ins(%[[EXPANDED]], %[[EXPANDED]]
+// CHECK:         %[[COLLAPSED:.+]] =  tensor.collapse_shape %[[RES]] {{\[}}[0], [1, 2]] : tensor<123x129x255xf32> into tensor<123x32895xf32>
+// CHECK:         flow.dispatch.tensor.store %[[COLLAPSED]], %[[OUT_BINDING]]
+// CHECK-SAME:      offsets = [0, 0], sizes = [123, 32895], strides = [1, 1]
+// CHECK-SAME:      : tensor<123x32895xf32> -> !flow.dispatch.tensor<writeonly:tensor<123x32959xf32>>
+
+// -----
+
 // We only have one matmul_k test because they are all going through interfaces.
 // Other logic is already tested above.
 
