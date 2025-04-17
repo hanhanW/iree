@@ -71,6 +71,7 @@ LogicalResult SwapEncodingOpWithTensorCollapseShapeOp::matchAndRewrite(
   // We need to revisit the matmul_k encoding semantic.
   SmallVector<ReassociationIndices, 4> reassociationMaps =
       collapseOp.getReassociationIndices();
+#if 0
   for (int32_t k : kDims) {
     if (reassociationMaps[k].size() != 1) {
       return rewriter.notifyMatchFailure(
@@ -78,6 +79,7 @@ LogicalResult SwapEncodingOpWithTensorCollapseShapeOp::matchAndRewrite(
           "expected collaps_shape ops to not transform k dimensions");
     }
   }
+#endif
 
   // Get a mapping from original iteration space to expanded iteration space.
   SmallVector<int32_t> newKDims;
