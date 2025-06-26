@@ -11,6 +11,7 @@
 #include "iree/compiler/Dialect/Flow/IR/FlowDialect.h"
 #include "iree/compiler/Dialect/Flow/IR/FlowOps.h"
 #include "iree/compiler/Dialect/Flow/Transforms/RegionOpUtils.h"
+#include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtDialect.h"
 #include "iree/compiler/Dialect/LinalgExt/Utils/Utils.h"
 #include "iree/compiler/Dialect/Util/IR/UtilOps.h"
 #include "iree/compiler/DispatchCreation/Passes.h"
@@ -218,6 +219,11 @@ void HoistEncodingOpsPass::runOnOperation() {
       opsWithinDispatch.insert(op);
       for (auto input : op->getOperands()) {
         if (auto inputOp = input.getDefiningOp()) {
+          if (isa_and_nonnull<linalg::LinalgDialect,
+                              IREE::LinalgExt::IREELinalgExtDialect>(
+                  inputOp->getDialect())) {
+            continue;
+          }
           if (inputOp->getParentOfType<IREE::Flow::DispatchRegionOp>() &&
               !opsWithinDispatch.contains(inputOp)) {
             worklist.push(inputOp);
