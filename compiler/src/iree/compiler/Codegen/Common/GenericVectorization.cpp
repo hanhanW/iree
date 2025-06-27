@@ -9,14 +9,17 @@
 #include "iree/compiler/Codegen/Dialect/VectorExt/IR/VectorExtDialect.h"
 #include "iree/compiler/Codegen/Dialect/VectorExt/Transforms/Transforms.h"
 #include "iree/compiler/Codegen/Utils/Utils.h"
+#include "llvm/Support/Casting.h"
 #include "mlir/Dialect/Affine/LoopUtils.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Arith/Utils/Utils.h"
 #include "mlir/Dialect/Linalg/Transforms/Hoisting.h"
 #include "mlir/Dialect/Linalg/Transforms/Transforms.h"
 #include "mlir/Dialect/MemRef/Transforms/Passes.h"
 #include "mlir/Dialect/MemRef/Transforms/Transforms.h"
 #include "mlir/Dialect/SCF/Utils/Utils.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
+#include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/Dialect/Vector/Transforms/LoweringPatterns.h"
 #include "mlir/Dialect/Vector/Transforms/VectorRewritePatterns.h"
 #include "mlir/Interfaces/ValueBoundsOpInterface.h"
@@ -32,6 +35,46 @@ namespace mlir::iree_compiler {
 #include "iree/compiler/Codegen/Common/Passes.h.inc"
 
 namespace {
+
+struct BubbleUpTensorDimOpPattern : public OpRewritePattern<tensor::DimOp> {
+  using OpRewritePattern::OpRewritePattern;
+  LogicalResult matchAndRewrite(tensor::DimOp dimOp,
+                                PatternRewriter &rewriter) const override {
+    dimOp.dump();
+    auto xferWrite = dimOp.getSource().getDefiningOp<vector::TransferWriteOp>();
+    dimOp.getSource().dump();
+    if (!xferWrite) {
+      return rewriter.notifyMatchFailure(
+          dimOp, "source is not vector.transfer_write op");
+    }
+    rewriter.modifyOpInPlace(
+        dimOp, [&]() { dimOp.getSourceMutable().assign(xferWrite.getBase()); });
+    return success();
+  }
+};
+
+struct BubbleUpTensorDimOpPattern2 : public OpRewritePattern<tensor::DimOp> {
+  using OpRewritePattern::OpRewritePattern;
+  LogicalResult matchAndRewrite(tensor::DimOp dimOp,
+                                PatternRewriter &rewriter) const override {
+    auto emptyOp = dimOp.getSource().getDefiningOp<tensor::EmptyOp>();
+    if (!emptyOp) {
+      return rewriter.notifyMatchFailure(
+          dimOp, "source is not vector.transfer_write op");
+    }
+    std::optional<int64_t> maybeCstIndex = dimOp.getConstantIndex();
+    if (!maybeCstIndex) {
+      return rewriter.notifyMatchFailure(dimOp, "non-constant index");
+    }
+    SmallVector<OpFoldResult> mixedSizes = emptyOp.getMixedSizes();
+    rewriter.replaceOp(dimOp, getValueOrCreateConstantIndexOp(
+                                  rewriter, dimOp.getLoc(),
+                                  mixedSizes[maybeCstIndex.value()]));
+    return success();
+  }
+};
+
+
 // Returns the vector sizes from the local lowering config or try to infer them
 // from the tensor shapes and tiled loops in the IR.
 static std::optional<SizesAndScalableFlags>
@@ -189,6 +232,9 @@ void GenericVectorizationPass::runOnOperation() {
   {
     // Canonicalize mask related ops before we lower them.
     RewritePatternSet maskCanonPatterns(funcOp.getContext());
+    maskCanonPatterns
+        .insert<BubbleUpTensorDimOpPattern, BubbleUpTensorDimOpPattern2>(
+            context);
     memref::populateResolveRankedShapedTypeResultDimsPatterns(
         maskCanonPatterns);
     tensor::DimOp::getCanonicalizationPatterns(maskCanonPatterns, context);

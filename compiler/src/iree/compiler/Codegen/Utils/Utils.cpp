@@ -1696,6 +1696,21 @@ bool isFullSlice(OffsetSizeAndStrideOpInterface sliceLoadStoreOp,
 // Utility functions for vector size inference for dynamic shapes
 //===----------------------------------------------------------------------===//
 
+std::optional<VectorizationTileSizes> inferSizesFromIR(scf::ForOp forOp,
+                                                       OpResult opResult) {
+  auto resType = dyn_cast<RankedTensorType>(
+      forOp.getResultTypes()[opResult.getResultNumber()]);
+  if (!resType || !resType.hasStaticShape()) {
+    LLVM_DEBUG(llvm::dbgs() << "not a static RankedTensorType result\n");
+    return std::nullopt;
+  }
+  VectorizationTileSizes result;
+  result.vectorSizes.assign(resType.getShape().begin(),
+                            resType.getShape().end());
+  result.destShape = result.vectorSizes;
+  return result;
+}
+
 std::optional<VectorizationTileSizes>
 inferSizesFromIR(linalg::LinalgOp linalgOp, std::optional<OpResult> opResult) {
   LLVM_DEBUG({
@@ -1869,10 +1884,10 @@ std::optional<VectorizationTileSizes> inferSizesFromIR(Value val) {
 
   std::optional<VectorizationTileSizes> result;
   TypeSwitch<Operation *, void>(val.getDefiningOp())
-      .Case<linalg::LinalgOp>(
+      .Case<linalg::LinalgOp, scf::ForOp>(
           [&](auto op) { result = inferSizesFromIR(op, cast<OpResult>(val)); })
       .Case<linalg::PackOp>([&](auto op) { result = inferSizesFromIR(op); })
-      .Case<tensor::ExtractSliceOp>([&](tensor::ExtractSliceOp op) {
+      .Case<tensor::ExtractSliceOp, tensor::EmptyOp>([&](auto op) {
         // tensor::ExtractSliceOp is not vectorizable, so only `destShape` has
         // the values.
         result = VectorizationTileSizes();
