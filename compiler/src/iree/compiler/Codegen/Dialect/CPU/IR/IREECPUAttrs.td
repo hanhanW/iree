@@ -12,6 +12,36 @@ include "iree/compiler/Codegen/Dialect/Codegen/IR/IREECodegenInterfaces.td"
 include "mlir/IR/AttrTypeBase.td"
 
 //===----------------------------------------------------------------------===//
+// CPU Specific Lowering Config Attributes
+//===----------------------------------------------------------------------===//
+
+// TODO(hanchung): Support pretty printer/parser for scalable vectors.
+def IREECPU_LoweringConfigAttr :
+    AttrDef<IREECPU_Dialect, "LoweringConfig", [
+      DeclareAttrInterfaceMethods<IREECodegen_LoweringConfigAttrInterface, [
+        "getWorkgroupTileSizes",
+        "getTilingLevelSizes",
+        "hasTilingLevel",
+        "hasWorkgroupTilingLevel",
+      ]>
+    ]> {
+  let mnemonic = "lowering_config";
+  let summary = [{Drive lowering of an operation for gpu compilation.}];
+  let description = [{
+    CPU specific implementation of a lowering config. This carries just a
+    dictionary attribute to store any relevant fields. This is the simplest
+    form of a lowering config, offering flexibility at the cost of structure.
+  }];
+
+  let assemblyFormat = "`<` $config `>`";
+
+  let parameters = (ins
+    AttrParameter<"DictionaryAttr",
+        "The configured fields, including tiling levels.">:$config
+  );
+}
+
+//===----------------------------------------------------------------------===//
 // Encoding Resolvers.
 //===----------------------------------------------------------------------===//
 
