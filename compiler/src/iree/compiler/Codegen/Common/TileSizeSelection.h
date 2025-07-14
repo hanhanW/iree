@@ -166,13 +166,12 @@ public:
   /// Returns a new `LoweringConfigAttr`, with the tile sizes of vector
   /// dimensions, set to `sizes`, and the corresponding scalability set to
   /// `scalableFlags`.
-  IREE::Codegen::LoweringConfigAttr
+  IREE::CPU::LoweringConfigAttr
   getLoweringConfigWithNewVectorSizes(ArrayRef<int64_t> sizes,
                                       ArrayRef<bool> scalableFlags = {});
 
-  /// Returns a list with the tiling levels that can be fused for this
-  /// configuration.
-  SmallVector<int64_t> getFusableLevels();
+  /// Returns true if the `level` is available in TilingConfig.
+  bool isValidLevel(TilingLevel level);
 
   /// Returns the `level`-th valid tiling attribute. Returns an empty vector if
   /// it does not exist.
@@ -208,11 +207,6 @@ private:
   SmallVector<int64_t> getTileSizesForLevel(unsigned level) {
     return loweringConfig.getStaticTilingLevelSizes(level, /*target=*/nullptr);
   }
-
-  /// Returns the tiling level that contains the vector dim at `dimPos` (which
-  /// is an index into the result of `getVectorTileSizes()`).
-  std::optional<unsigned>
-  getTilingLevelForVectorDimPosition(unsigned dimPos) const;
 
   /// Returns the actual level in the configuration for this level of tiling.
   unsigned getActualLevel(TilingLevel level);

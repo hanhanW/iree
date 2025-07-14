@@ -37,8 +37,7 @@ namespace {
 static std::optional<SizesAndScalableFlags>
 getVectorSizes(Operation *op, bool useConfiguredVectorSizes) {
   // Get vector sizes from the lowering config, if available in the op itself.
-  auto loweringConfig =
-      getLoweringConfig<IREE::Codegen::LoweringConfigAttr>(op);
+  auto loweringConfig = getLoweringConfig(op);
   if (useConfiguredVectorSizes && loweringConfig) {
     TilingConfig tilingConfig(loweringConfig);
     auto [vectorSizes, scalableFlags] = tilingConfig.getVectorTileSizes();
