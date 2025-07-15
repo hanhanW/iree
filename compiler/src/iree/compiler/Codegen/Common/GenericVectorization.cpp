@@ -6,9 +6,12 @@
 
 #include "iree/compiler/Codegen/Common/Passes.h"
 #include "iree/compiler/Codegen/Common/TileSizeSelection.h"
+#include "iree/compiler/Codegen/Dialect/CPU/IR/IREECPUTypes.h"
+#include "iree/compiler/Codegen/Dialect/Codegen/IR/IREECodegenAttrs.h"
 #include "iree/compiler/Codegen/Dialect/VectorExt/IR/VectorExtDialect.h"
 #include "iree/compiler/Codegen/Dialect/VectorExt/Transforms/Transforms.h"
 #include "iree/compiler/Codegen/Utils/Utils.h"
+#include "llvm/Support/Casting.h"
 #include "mlir/Dialect/Affine/LoopUtils.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Linalg/Transforms/Hoisting.h"
@@ -38,7 +41,10 @@ static std::optional<SizesAndScalableFlags>
 getVectorSizes(Operation *op, bool useConfiguredVectorSizes) {
   // Get vector sizes from the lowering config, if available in the op itself.
   auto loweringConfig = getLoweringConfig(op);
-  if (useConfiguredVectorSizes && loweringConfig) {
+  if (useConfiguredVectorSizes &&
+      llvm::isa_and_present<IREE::CPU::LoweringConfigAttr,
+                            IREE::Codegen::LoweringConfigAttr>(
+          loweringConfig)) {
     TilingConfig tilingConfig(loweringConfig);
     auto [vectorSizes, scalableFlags] = tilingConfig.getVectorTileSizes();
     // Replace zeros in canonical vector shape to turn it into a valid shape.

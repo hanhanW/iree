@@ -146,6 +146,7 @@ SizesAndScalableFlags TilingConfig::getVectorTileSizes() {
 IREE::CPU::LoweringConfigAttr TilingConfig::getLoweringConfigWithNewVectorSizes(
     ArrayRef<int64_t> sizes, ArrayRef<bool> scalableFlags) {
   unsigned numDims = getNumDimensions();
+  (void)numDims;
   assert(sizes.size() == numDims &&
          "expected `sizes` to match number of dimensions");
   assert((scalableFlags.empty() || scalableFlags.size() == numDims) &&
