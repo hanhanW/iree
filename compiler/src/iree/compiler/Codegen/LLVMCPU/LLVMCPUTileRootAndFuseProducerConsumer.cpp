@@ -192,8 +192,16 @@ void LLVMCPUTileRootAndFuseProducerConsumer::runOnOperation() {
   IRRewriter rewriter(funcOp);
 
   SmallVector<Operation *> computeOps = getComputeOps(funcOp);
-  FailureOr<Operation *> rootOp = getRootOperation(computeOps);
-  if (failed(rootOp) || !rootOp.value()) {
+  FailureOr<Operation *> rootOp;
+  for (auto op : computeOps) {
+    IREE::Codegen::LoweringConfigAttrInterface loweringConfig =
+        getLoweringConfig(op);
+    if (loweringConfig && loweringConfig.hasWorkgroupTilingLevel()) {
+      rootOp = op;
+      break;
+    }
+  }
+  if (failed(rootOp)) {
     LDBG("unable to find the root operation");
     return;
   }
