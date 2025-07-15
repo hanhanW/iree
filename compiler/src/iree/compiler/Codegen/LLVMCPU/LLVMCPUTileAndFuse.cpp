@@ -254,10 +254,12 @@ void LLVMCPUTileAndFusePass::runOnOperation() {
   // fallback to find a lowering_config from other operations.
   SmallVector<int64_t> tileSizes;
   SmallVector<bool> tileScalableFlags;
-  if (auto loweringConfig =
-          getLoweringConfig<IREE::Codegen::LoweringConfigAttr>(consumerOp)) {
-    tileSizes = loweringConfig.getTileSizeVals(tilingLevel);
-    tileScalableFlags = loweringConfig.getScalableTileFlagVals(tilingLevel);
+  if (auto loweringConfig = getLoweringConfig(consumerOp)) {
+    auto attr = cast<IREE::Codegen::LoweringConfigTilingLevelAttr>(
+        loweringConfig.getTilingLevelAttr(static_cast<int64_t>(tilingLevel)));
+    tileSizes.assign(attr.getSizes().begin(), attr.getSizes().end());
+    tileScalableFlags.assign(attr.getScalableFlags().begin(),
+                             attr.getScalableFlags().end());
   } else {
     FailureOr<IREE::Codegen::LoweringConfigAttr> maybeLoweringConfig =
         getFirstLoweringConfig<IREE::Codegen::LoweringConfigAttr>(
