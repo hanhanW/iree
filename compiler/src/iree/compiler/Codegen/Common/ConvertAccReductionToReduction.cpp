@@ -8,17 +8,17 @@
 #include "iree/compiler/Codegen/Dialect/Codegen/IR/IREECodegenOps.h"
 #include "iree/compiler/Codegen/Dialect/GPU/IR/IREEGPUAttrs.h"
 #include "iree/compiler/Codegen/Dialect/GPU/IR/IREEGPUInterfaces.h"
-#include "iree/compiler/Dialect/TensorExt/IR/TensorExtOps.h"
+#include "iree/compiler/Codegen/Utils/Utils.h"
 #include "mlir/Analysis/SliceAnalysis.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Linalg/Transforms/Transforms.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
-#include "mlir/Dialect/Tensor/Utils/Utils.h"
 #include "mlir/Dialect/Utils/StructuredOpsUtils.h"
 #include "mlir/IR/AffineMap.h"
 #include "mlir/IR/PatternMatch.h"
-#include "mlir/Transforms/WalkPatternRewriteDriver.h"
+#include "mlir/IR/TypeUtilities.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
 namespace mlir::iree_compiler {
 
@@ -163,6 +163,32 @@ static void convertAccGemmToGemm(RewriterBase &rewriter,
   dpsOp->getResult(0).replaceAllUsesExcept(genericOp->getResult(0), genericOp);
 }
 
+static void replaceUnusedResultFromReadOnlyToEmpty(RewriterBase &rewriter,
+                                                   linalg::LinalgOp op) {
+  if (!op.hasPureTensorSemantics()) {
+    return;
+  }
+  if (op.getNumLoops() != op.getNumParallelLoops()) {
+    return;
+  }
+
+  OpBuilder::InsertionGuard guard(rewriter);
+  Location loc = op.getLoc();
+  for (OpOperand &init : op.getDpsInitsMutable()) {
+    if (!op.getMatchingBlockArgument(&init).use_empty()) {
+      continue;
+    }
+    if (!isReadOnly(init.get())) {
+      continue;
+    }
+    rewriter.setInsertionPoint(op);
+    Type elemType = getElementTypeOrSelf(init.get().getType());
+    Value emptyOp = rewriter.create<tensor::EmptyOp>(
+        loc, tensor::getMixedSizes(rewriter, loc, init.get()), elemType);
+    rewriter.modifyOpInPlace(op, [&]() { init.assign(emptyOp); });
+  }
+}
+
 namespace {
 
 struct ConvertAccReductionToReductionPass final
@@ -178,6 +204,10 @@ struct ConvertAccReductionToReductionPass final
       convertAccGemmToGemm(rewriter,
                            cast<DestinationStyleOpInterface>(candidate));
     }
+
+    funcOp.walk([&rewriter](linalg::LinalgOp op) {
+      replaceUnusedResultFromReadOnlyToEmpty(rewriter, op);
+    });
   }
 };
 
