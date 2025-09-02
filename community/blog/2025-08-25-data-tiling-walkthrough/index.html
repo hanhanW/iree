@@ -4883,11 +4883,11 @@
 operations, such as matrix multiplication, that prefer specific layouts. These
 layout preferences depend on the operations and the target hardware. For
 example, matrix multiplications may need to use hardware matrix multiplication
-instructions that perform optimally with a specific matrix data layout. Layout
-changes may also be motivated by memory access performance, as data-tiling can
-result in improved locality of memory accesses, fewer cache lines being
-accessed, and generally simpler memory access patterns that are more likely to
-be handled performantly by the memory system.</p>
+instructions that perform optimally with a specific matrix data layout.</p>
+<p>Layout changes may also be motivated by memory access performance, as
+data-tiling can result in improved locality of memory accesses, fewer cache
+lines being accessed, and generally simpler memory access patterns that are more
+likely to be handled performantly by the memory system.</p>
 <p>These layout changes can be propagated as far as possible across the workload,
 so the entire workload can use the updated layouts, as opposed to having to
 perform layout transformations at runtime. This may involve fusions or
@@ -4989,6 +4989,7 @@ enable data-tiling for matmuls. There are two modes:</p>
 <li>Skip the pass, if any operation already has the data-tiling hint attribute.</li>
 </ul>
 <p>It allows users to set the attribute in preprocessing phase or the model.</p>
+<!-- markdownlint-disable -->
 <details><summary>IR dump before the pass</summary>
 
 <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 1</span>
@@ -5074,6 +5075,7 @@ enable data-tiling for matmuls. There are two modes:</p>
 </code></pre></div></td></tr></table></div>
 
 </details>
+<!-- markdownlint-restore -->
 
 <h3 id="setencodingpass-dispatchcreation">SetEncodingPass (DispatchCreation)<a class="headerlink" href="#setencodingpass-dispatchcreation" title="Permanent link">link</a></h3>
 <p>The pass sets the encodings on matmul operands, and it propagates the encodings
@@ -5101,6 +5103,7 @@ useful for skinny matmul like matvec, vecmat, etc.</p>
 to the local dispatch. However, it is very useful in the later lowering because
 IREE can fuse <code>iree_encoding.set_encoding</code> ops with producers that provide the
 information across dispatches.</p>
+<!-- markdownlint-disable -->
 <details><summary>IR dump after the pass</summary>
 
 <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 1</span>
@@ -5179,11 +5182,13 @@ information across dispatches.</p>
 </code></pre></div></td></tr></table></div>
 
 </details>
+<!-- markdownlint-restore -->
 
 <h3 id="hoistencodingopspass-dispatchcreation">HoistEncodingOpsPass (DispatchCreation)<a class="headerlink" href="#hoistencodingopspass-dispatchcreation" title="Permanent link">link</a></h3>
 <p>The pass runs local propagation locally and hoists tensor encoding ops outside
 Flow dispatch regions, so the <code>iree_encoding.set_encoding</code> ops can be fused
 within producers later on.</p>
+<!-- markdownlint-disable -->
 <details><summary>IR dump after the pass</summary>
 
 <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 1</span>
@@ -5262,6 +5267,7 @@ util.func public @matmul_f32f32f32(%arg0: !hal.buffer_view, %arg1: !hal.buffer_v
 </code></pre></div></td></tr></table></div>
 
 </details>
+<!-- markdownlint-restore -->
 
 <details><summary>Example with local propagation</summary>
 
@@ -5274,6 +5280,7 @@ second input operand has an encoding after propagation. Thus, there are three
 
 IR dump before the pass:
 
+<!-- markdownlint-disable -->
 <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 1</span>
 <span class="normal"> 2</span>
 <span class="normal"> 3</span>
@@ -5463,6 +5470,7 @@ IR dump after the pass:
   util.return %6 : !hal.buffer_view
 }
 </code></pre></div></td></tr></table></div>
+<!-- markdownlint-restore -->
 
 </details>
 
@@ -5491,6 +5499,7 @@ Note: the `canonicalize` is run after the pass in this example, because it makes
 IR clear. Otherwise, there are `arith.constant` ops and `tensor.dim` ops around
 `flow.tensor.encode` ops.
 
+<!-- markdownlint-disable -->
 <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 1</span>
 <span class="normal"> 2</span>
 <span class="normal"> 3</span>
@@ -5569,6 +5578,7 @@ module {
   }
 }
 </code></pre></div></td></tr></table></div>
+<!-- markdownlint-restore -->
 
 </details>
 
@@ -5589,6 +5599,7 @@ they can only be executed in initialization phase today.</p>
 
 IR dump before the pass:
 
+<!-- markdownlint-disable -->
 <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 1</span>
 <span class="normal"> 2</span>
 <span class="normal"> 3</span>
@@ -5685,9 +5696,11 @@ util.func public @foo(%arg0: !hal.buffer_view, %arg1: !hal.buffer_view) -&gt; !h
   util.return %6 : !hal.buffer_view
 }
 </code></pre></div></td></tr></table></div>
+<!-- markdownlint-restore -->
 
 IR dump after the pass:
 
+<!-- markdownlint-disable -->
 <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 1</span>
 <span class="normal"> 2</span>
 <span class="normal"> 3</span>
@@ -5806,6 +5819,7 @@ module attributes {stream.affinity.default = #hal.device.affinity&lt;@__device_0
   }
 }
 </code></pre></div></td></tr></table></div>
+<!-- markdownlint-restore -->
 
 </details>
 
@@ -5823,6 +5837,7 @@ the function arguments become opaque types (i.e., <code>stream.binding</code> ty
   the storage buffer size that will be used to issue the allocation later on.</li>
 <li>The <code>dispatch</code> op describes how we call the functions in the program.</li>
 </ul>
+<!-- markdownlint-disable -->
 <details><summary>IR dump before the pass</summary>
 
 <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 1</span>
@@ -5927,7 +5942,9 @@ module attributes {stream.affinity.default = #hal.device.affinity&lt;@__device_0
 </code></pre></div></td></tr></table></div>
 
 </details>
+<!-- markdownlint-restore -->
 
+<!-- markdownlint-disable -->
 <details><summary>IR dump after the pass</summary>
 
 <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 1</span>
@@ -6062,6 +6079,7 @@ module attributes {stream.affinity.default = #hal.device.affinity&lt;@__device_0
 </code></pre></div></td></tr></table></div>
 
 </details>
+<!-- markdownlint-restore -->
 
 <h3 id="specializeencodingspass-stream">SpecializeEncodingsPass (Stream)<a class="headerlink" href="#specializeencodingspass-stream" title="Permanent link">link</a></h3>
 <p>The pass resolves the layouts based on Stream affinity analysis. It updates the
@@ -6226,6 +6244,7 @@ materialized later on in CodeGen pipeline. For example:</p>
   return
 }
 </code></pre></div></td></tr></table></div>
+<!-- markdownlint-disable -->
 <details><summary>IR dump after the pass</summary>
 
 <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 1</span>
@@ -6428,6 +6447,7 @@ module attributes {stream.affinity.default = #hal.device.affinity&lt;@__device_0
 </code></pre></div></td></tr></table></div>
 
 </details>
+<!-- markdownlint-restore -->
 
 <details><summary>Deep dive into multi-device cases</summary>
 
@@ -6448,6 +6468,7 @@ possibilities. In this case, we have to duplicate the executable with updated
 encoding, and modify the dispatch to launch proper executable based on resolved
 encoding layouts.
 
+<!-- markdownlint-disable -->
 <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 1</span>
 <span class="normal"> 2</span>
 <span class="normal"> 3</span>
@@ -6490,6 +6511,7 @@ util.func public @multi_device_set_encoding() {
 </span>  util.return
 }
 </code></pre></div></td></tr></table></div>
+<!-- markdownlint-restore -->
 
 Thus, the SpecializeEncoding pass collects all the layout variants per
 executable, duplicate the executables with updated encodings, and update the
@@ -6501,6 +6523,7 @@ Note that the duplication does not only look at execution affinity, but also
 look at the layouts for each input operands. Because the actual layout can vary
 based on where the input operands come from.
 
+<!-- markdownlint-disable -->
 <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 1</span>
 <span class="normal"> 2</span>
 <span class="normal"> 3</span>
@@ -6641,6 +6664,7 @@ util.func public @multi_device_set_encoding() {
 </span>  util.return
 }
 </code></pre></div></td></tr></table></div>
+<!-- markdownlint-restore -->
 
 For more examples, see the <a href="https://github.com/iree-org/iree/blob/main/compiler/src/iree/compiler/Dialect/Stream/Transforms/test/specialize_encodings.mlir">lit tests</a>.
 

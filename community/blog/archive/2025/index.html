@@ -4658,11 +4658,11 @@
 operations, such as matrix multiplication, that prefer specific layouts. These
 layout preferences depend on the operations and the target hardware. For
 example, matrix multiplications may need to use hardware matrix multiplication
-instructions that perform optimally with a specific matrix data layout. Layout
-changes may also be motivated by memory access performance, as data-tiling can
-result in improved locality of memory accesses, fewer cache lines being
-accessed, and generally simpler memory access patterns that are more likely to
-be handled performantly by the memory system.</p>
+instructions that perform optimally with a specific matrix data layout.</p>
+<p>Layout changes may also be motivated by memory access performance, as
+data-tiling can result in improved locality of memory accesses, fewer cache
+lines being accessed, and generally simpler memory access patterns that are more
+likely to be handled performantly by the memory system.</p>
 <p>These layout changes can be propagated as far as possible across the workload,
 so the entire workload can use the updated layouts, as opposed to having to
 perform layout transformations at runtime. This may involve fusions or
