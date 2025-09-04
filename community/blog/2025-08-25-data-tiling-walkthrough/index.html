@@ -4753,6 +4753,15 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#build-your-own-encoding-attributes-and-resolver" class="md-nav__link">
+    <span class="md-ellipsis">
+      Build Your Own Encoding Attributes and Resolver
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -7057,7 +7066,7 @@ be found in
 <li>The compute ops, e.g., <code>linalg.matmul</code>, are replaced with the ops without
   encodings. In the example, the GPU encoding resolver lowers <code>linalg.matmul</code> to
   <code>iree_codegen.inner_tiled</code> ops. The implementation is done by
-  <a href="https://github.com/iree-org/iree/blob/e6fb1e180438c4f78a1ea2bafd9a653fbe7a064b/compiler/src/iree/compiler/Codegen/ExternalInterfaces/GPUEncodingExternalModels.cpp#L364-L383">interface methods</a></li>
+  <a href="https://github.com/iree-org/iree/blob/e6fb1e180438c4f78a1ea2bafd9a653fbe7a064b/compiler/src/iree/compiler/Codegen/ExternalInterfaces/GPUEncodingExternalModels.cpp#L364-L383">interface methods</a>.</li>
 </ul>
 <p>After the encoding materialization, the code-generation pipeline is as the same
 as regular input. In the example, they all go down to GPU TileAndFuse pipeline.</p>
@@ -7973,6 +7982,32 @@ then the padding values are written directly to the output buffer of the
 
 </details>
 <!-- markdownlint-restore -->
+
+<h2 id="build-your-own-encoding-attributes-and-resolver">Build Your Own Encoding Attributes and Resolver<a class="headerlink" href="#build-your-own-encoding-attributes-and-resolver" title="Permanent link">link</a></h2>
+<p>Data-tiling is an optional optimization technique, and it is not supported by
+all backends. The targets that support data-tiling are:</p>
+<ul>
+<li>CPU (x86)</li>
+<li>CPU (AArch64)</li>
+<li>CPU (RISC-V)</li>
+<li>GPU (ROCm)</li>
+<li>VMVX</li>
+</ul>
+<p>More targets may be supported in the future, and contributions are welcome. You
+can explore the available options in
+<a href="https://github.com/iree-org/iree/tree/main/compiler/src/iree/compiler/Codegen/ExternalInterfaces">Codegen/ExternalInterfaces/</a>.</p>
+<p>The encoding type attributes are defined in
+<a href="https://github.com/iree-org/iree/blob/main/compiler/src/iree/compiler/Dialect/Encoding/IR/EncodingAttrs.td">EncodingAttrs.td</a>;
+the target-specific encoding resolvers, which decide how these attributes are
+lowered, are defined in their dialects. E.g., CPU defines the encoding
+resolvers in
+<a href="https://github.com/iree-org/iree/blob/main/compiler/src/iree/compiler/Codegen/Dialect/CPU/IR/IREECPUAttrs.td">IREECPUAttrs.td</a>,
+and GPU defines the encoding resolvers in
+<a href="https://github.com/iree-org/iree/blob/main/compiler/src/iree/compiler/Codegen/Dialect/GPU/IR/IREEGPUAttrs.td">IREEGPUAttrs.td</a>.</p>
+<p>The interface implementations are isolated in
+<a href="https://github.com/iree-org/iree/tree/main/compiler/src/iree/compiler/Codegen/ExternalInterfaces">Codegen/ExternalInterfaces/</a>,
+to avoid moving domain-specific logic into the dialect implementations. You can
+follow one of the implementations to build your own encoding resolver.</p>
 
 
 
