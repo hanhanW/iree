@@ -4924,7 +4924,7 @@ host/device programming model. [<a href="https://llvm.org/devmtg/2025-06/slides/
 <span class="w">  </span>--iree-hip-encoding-layout-resolver<span class="o">=</span>data-tiling<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--iree-llvmgpu-test-combine-layout-transformation<span class="o">=</span><span class="nb">true</span>
 </code></pre></div>
-<p>Test source program: matmul.mlir:</p>
+<p>Test source program, matmul.mlir:</p>
 <div class="highlight"><pre><span></span><code>func.func @matmul_f32f32f32(%arg0: tensor&lt;?x?xf32&gt;, %arg1: tensor&lt;?x?xf32&gt;) -&gt; tensor&lt;?x?xf32&gt; {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
@@ -4939,6 +4939,23 @@ host/device programming model. [<a href="https://llvm.org/devmtg/2025-06/slides/
   return %2 : tensor&lt;?x?xf32&gt;
 }
 </code></pre></div>
+<!-- markdownlint-disable -->
+<details><summary>Compilation command that targets host CPU</summary>
+
+Below is the compilation command that targets your host CPU. The IR dumps are
+different from what the post shows, but they follow the same mechanism.
+
+<div class="highlight"><pre><span></span><code>iree-compile<span class="w"> </span>matmul.mlir<span class="w"> </span>-o<span class="w"> </span>/tmp/matmul.mlir<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--iree-hal-target-device<span class="o">=</span><span class="nb">local</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--iree-hal-local-target-device-backends<span class="o">=</span>llvm-cpu<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--iree-llvmcpu-target-cpu-features<span class="o">=</span>host<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--iree-opt-data-tiling<span class="o">=</span><span class="nb">false</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--iree-dispatch-creation-data-tiling
+</code></pre></div>
+
+</details>
+<!-- markdownlint-restore -->
+
 <h2 id="target-independent-optimizations">Target-Independent Optimizations<a class="headerlink" href="#target-independent-optimizations" title="Permanent link">link</a></h2>
 <p>Data-tiling can start from either GlobalOptimization phase or DispatchCreation
 phase. The former one is the current default, and the latter one is mainly
