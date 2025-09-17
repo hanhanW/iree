@@ -267,6 +267,19 @@ def RefineUsagePass :
   ];
 }
 
+def UnifyEncodingForGlobalsPass :
+    Pass<"iree-stream-unify-encoding-for-globals", "mlir::ModuleOp"> {
+  let summary = "Unifies the encodings if a global is encoded with different encodings.";
+  let description = [{
+    TBD.
+  }];
+  let dependentDialects = [
+    "IREE::Encoding::IREEEncodingDialect",
+    "IREE::Stream::StreamDialect",
+    "IREE::Util::UtilDialect"
+  ];
+}
+
 //===----------------------------------------------------------------------===//
 // Stream formation and scheduling
 //===----------------------------------------------------------------------===//

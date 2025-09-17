@@ -1,0 +1,403 @@
+// Copyright 2025 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#include "iree/compiler/Dialect/Encoding/IR/EncodingDialect.h"
+#include "iree/compiler/Dialect/Encoding/IR/EncodingTypes.h"
+#include "iree/compiler/Dialect/Stream/Analysis/Affinity.h"
+#include "iree/compiler/Dialect/Stream/IR/StreamInterfaces.h"
+#include "iree/compiler/Dialect/Stream/IR/StreamOps.h"
+#include "iree/compiler/Dialect/Stream/IR/StreamTypes.h"
+#include "iree/compiler/Dialect/Stream/Transforms/Passes.h"
+#include "iree/compiler/Dialect/Util/Analysis/DFX/State.h"
+#include "iree/compiler/Dialect/Util/Analysis/Explorer.h"
+#include "iree/compiler/Dialect/Util/IR/UtilDialect.h"
+#include "iree/compiler/Dialect/Util/IR/UtilTypes.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/TypeSwitch.h"
+#include "llvm/Support/DebugLog.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Support/LLVM.h"
+
+namespace mlir::iree_compiler::IREE::Stream {
+
+#define DEBUG_TYPE "iree-stream-unify-encoding-for-globals"
+
+#define GEN_PASS_DEF_UNIFYENCODINGFORGLOBALSPASS
+#include "iree/compiler/Dialect/Stream/Transforms/Passes.h.inc"
+
+namespace {
+
+// TODO: Revisit the comments. Some of them are either copy from existing code
+// or self note.
+
+// [Global, direct encoding layout]
+// TODO: Tracking the encoding chain may not be needed at this level. It makes
+// sense to use the last encoding instead, since encoding is a hint. You don't
+// expect to relayout a tensor several times in the encode ops chain.
+using Item = std::tuple<IREE::Util::GlobalOpInterface, SmallVector<Attribute>>;
+
+static const std::string
+getLayoutSetAsStr(const DFX::PotentialValuesState<Item> &state,
+                  AsmState &asmState) {
+  DenseSet<Item, DenseMapInfo<Item>> assumedSet = state.getAssumedSet();
+  std::string str;
+  llvm::raw_string_ostream sstream(str);
+  sstream << "pvs: ";
+  if (state.isValidState()) {
+    sstream << "[";
+    if (state.isUndefContained()) {
+      sstream << "undef, ";
+    }
+    llvm::interleaveComma(state.getAssumedSet(), sstream, [&](Item item) {
+      sstream << "\n\t";
+      sstream << "global=";
+      std::get<0>(item).getGlobalName().print(sstream);
+      sstream << ", chain=(";
+      llvm::interleaveComma(std::get<1>(item), sstream,
+                            [&](Attribute value) { value.print(sstream); });
+      sstream << ")";
+    });
+    sstream << "]";
+  } else {
+    sstream << "(invalid)";
+  }
+  sstream.flush();
+  return str;
+}
+
+class GlobalPVS
+    : public DFX::StateWrapper<
+          DFX::PotentialValuesState<Item>,
+          DFX::TypedOperationElement<IREE::Util::GlobalOpInterface>> {
+public:
+  using BaseType = DFX::StateWrapper<
+      DFX::PotentialValuesState<Item>,
+      DFX::TypedOperationElement<IREE::Util::GlobalOpInterface>>;
+  using BaseType::BaseType;
+
+  static GlobalPVS &createForPosition(const Position &pos,
+                                      DFX::Solver &solver) {
+    return *(new (solver.getAllocator()) GlobalPVS(pos));
+  }
+
+  // Identity definitions.
+  const std::string getName() const override { return "GlobalPVS"; }
+  const void *getID() const override { return &ID; }
+  static bool classof(const DFX::AbstractElement *element) {
+    return (element->getID() == &ID);
+  }
+  static const char ID;
+
+  const std::string getAsStr(AsmState &asmState) const override {
+    return getLayoutSetAsStr(getState(), asmState);
+  }
+
+private:
+  void initializeOperation(IREE::Util::GlobalOpInterface globalOp,
+                           DFX::Solver &solver) override;
+  ChangeStatus updateOperation(IREE::Util::GlobalOpInterface globalOp,
+                               DFX::Solver &solver) override;
+};
+const char GlobalPVS::ID = 0;
+
+class OpPVS : public DFX::StateWrapper<DFX::PotentialValuesState<Item>,
+                                       DFX::OperationElement> {
+public:
+  using BaseType =
+      DFX::StateWrapper<DFX::PotentialValuesState<Item>, DFX::OperationElement>;
+  using BaseType::BaseType;
+
+  static OpPVS &createForPosition(const Position &pos, DFX::Solver &solver) {
+    return *(new (solver.getAllocator()) OpPVS(pos));
+  }
+
+  // Identity definitions.
+  const std::string getName() const override { return "OpPVS"; }
+  const void *getID() const override { return &ID; }
+  static bool classof(const DFX::AbstractElement *element) {
+    return (element->getID() == &ID);
+  }
+  static const char ID;
+
+  const std::string getAsStr(AsmState &asmState) const override {
+    return getLayoutSetAsStr(getState(), asmState);
+  }
+
+private:
+  void initializeOperation(Operation *op, DFX::Solver &solver) override;
+  ChangeStatus updateOperation(Operation *op, DFX::Solver &solver) override;
+};
+const char OpPVS::ID = 0;
+
+class ValueProducerPVS
+    : public DFX::StateWrapper<DFX::PotentialValuesState<Item>,
+                               DFX::ValueElement> {
+public:
+  using BaseType =
+      DFX::StateWrapper<DFX::PotentialValuesState<Item>, DFX::ValueElement>;
+  using BaseType::BaseType;
+
+  static ValueProducerPVS &createForPosition(const Position &pos,
+                                             DFX::Solver &solver) {
+    return *(new (solver.getAllocator()) ValueProducerPVS(pos));
+  }
+
+  // Identity definitions.
+  const std::string getName() const override { return "ValueProducerPVS"; }
+  const void *getID() const override { return &ID; }
+  static bool classof(const DFX::AbstractElement *element) {
+    return (element->getID() == &ID);
+  }
+  static const char ID;
+
+  const std::string getAsStr(AsmState &asmState) const override {
+    return getLayoutSetAsStr(getState(), asmState);
+  }
+
+private:
+  void initializeValue(Value value, DFX::Solver &solver) override;
+  ChangeStatus updateValue(Value value, DFX::Solver &solver) override;
+};
+const char ValueProducerPVS::ID = 0;
+
+//===----------------------------------------------------------------------===//
+// GlobalPVS
+//===----------------------------------------------------------------------===//
+
+void GlobalPVS::initializeOperation(IREE::Util::GlobalOpInterface globalOp,
+                                    DFX::Solver &solver) {
+  auto *globalInfo = solver.getExplorer().getGlobalInfo(globalOp);
+  if (!globalInfo || globalInfo->isIndirect) {
+    // Cannot perform analysis.
+    indicatePessimisticFixpoint();
+  } else if (globalInfo) {
+    Item init = {globalInfo->op, {}};
+    unionAssumed(init);
+  }
+  return;
+}
+
+ChangeStatus GlobalPVS::updateOperation(IREE::Util::GlobalOpInterface globalOp,
+                                        DFX::Solver &solver) {
+  StateType newState;
+  auto traversalResult = TraversalResult::COMPLETE;
+
+  const auto *globalInfo = solver.getExplorer().getGlobalInfo(globalOp);
+  if (globalInfo->isIndirect) {
+    traversalResult = TraversalResult::INCOMPLETE;
+  }
+  for (auto store : globalInfo->getStores()) {
+    newState.unionAssumed(
+        solver.getOrCreateElementFor<OpPVS>(Position::forOperation(store)));
+  }
+  if (traversalResult == TraversalResult::INCOMPLETE) {
+    // Incomplete traversal because of external call graph edges or pointers.
+    newState.unionAssumedWithUndef();
+    newState.indicatePessimisticFixpoint();
+  }
+  return DFX::clampStateAndIndicateChange(getState(), newState);
+}
+
+//===----------------------------------------------------------------------===//
+// OpPVS
+//===----------------------------------------------------------------------===//
+
+void OpPVS::initializeOperation(Operation *op, DFX::Solver &solver) {}
+
+ChangeStatus OpPVS::updateOperation(Operation *op, DFX::Solver &solver) {
+  StateType newState;
+  TypeSwitch<Operation *>(op)
+      .Case<IREE::Util::GlobalStoreOpInterface>([&](auto store) {
+        auto &producerPVS = solver.getElementFor<ValueProducerPVS>(
+            *this, Position::forValue(store.getStoredGlobalValue()),
+            DFX::Resolution::REQUIRED);
+        LLVM_DEBUG(producerPVS.getAsStr(solver.getAsmState()));
+        newState.unionAssumed(producerPVS.getState());
+        if (producerPVS.isValidState()) {
+          newState.unionAssumed(producerPVS);
+        } else {
+          newState.unionAssumedWithUndef();
+          newState.indicatePessimisticFixpoint();
+        }
+      })
+      .Default([](Operation *) { return; });
+  return DFX::clampStateAndIndicateChange(getState(), newState);
+}
+
+//===----------------------------------------------------------------------===//
+// ValueProducerPVS
+//===----------------------------------------------------------------------===//
+
+void ValueProducerPVS::initializeValue(Value value, DFX::Solver &solver) {}
+
+ChangeStatus ValueProducerPVS::updateValue(Value value, DFX::Solver &solver) {
+  MLIRContext *ctx = value.getContext();
+  StateType newState;
+  auto traversalResult = TraversalResult::COMPLETE;
+  traversalResult |= solver.getExplorer().walkDefiningOps(
+      value,
+      [&](OpResult result) {
+        if (isa<CallOpInterface>(result.getOwner())) {
+          return WalkResult::advance();
+        }
+
+        // TODO: Handle interface ops, if any.
+
+        // Special handling for specific ops.
+        TypeSwitch<Operation *>(result.getOwner())
+            .Case<IREE::Util::GlobalLoadOpInterface>([&](auto loadOp) {
+              const Explorer::GlobalInfo *globalInfo =
+                  solver.getExplorer().queryGlobalInfoFrom(
+                      loadOp.getGlobalName(), loadOp);
+              auto &globalPVS = solver.getElementFor<GlobalPVS>(
+                  *this, Position::forOperation(globalInfo->op),
+                  DFX::Resolution::REQUIRED);
+              newState.unionAssumed(globalPVS);
+            })
+            .Case<IREE::Stream::AsyncTransferOp>([&](auto op) {
+              auto sourceState = solver.getElementFor<ValueProducerPVS>(
+                  *this, Position::forValue(op.getSource()),
+                  DFX::Resolution::REQUIRED);
+              newState ^= sourceState;
+            })
+            .Case<IREE::Stream::TensorEncodeOp>([&](auto op) {
+              auto sourceState = solver.getElementFor<ValueProducerPVS>(
+                  *this, Position::forValue(op.getSource()),
+                  DFX::Resolution::REQUIRED);
+              auto encodingType =
+                  dyn_cast<RankedTensorType>(op.getResultEncoding());
+              if (!encodingType) {
+                // Bail out if we don't know what to do.
+                return;
+              }
+              Attribute encoding = encodingType.getEncoding();
+              if (!encoding) {
+                encoding = IREE::Encoding::IdentityAttr::get(ctx);
+              }
+              for (auto [globalOp, encodingChain] :
+                   sourceState.getState().getAssumedSet()) {
+                Item item = {globalOp, encodingChain};
+                std::get<1>(item).push_back(encoding);
+                newState.unionAssumed(item);
+              }
+            })
+            .Default([&](auto op) {});
+
+        return WalkResult::advance();
+      },
+      (TraversalBehavior::DEFAULT | TraversalBehavior::DONT_WALK_TIED_VALUES));
+  if (traversalResult == TraversalResult::INCOMPLETE) {
+    // Incomplete traversal because of external call graph edges or pointers.
+    newState.unionAssumedWithUndef();
+    newState.indicatePessimisticFixpoint();
+  }
+  return DFX::clampStateAndIndicateChange(getState(), newState);
+}
+
+//===----------------------------------------------------------------------===//
+// EncodingAnalysis
+//===----------------------------------------------------------------------===//
+
+class EncodingAnalysis {
+public:
+  explicit EncodingAnalysis(Operation *rootOp);
+  ~EncodingAnalysis() = default;
+
+  LogicalResult run();
+
+  SmallVector<Item> lookupGlobalConsumerLayouts(Operation *op);
+
+private:
+  Explorer explorer;
+  llvm::BumpPtrAllocator allocator;
+  DFX::Solver solver;
+  DenseMap<Operation *, llvm::SmallSetVector<Item, 4>> globalConsumerLayouts;
+};
+}; // namespace
+
+EncodingAnalysis::EncodingAnalysis(Operation *rootOp)
+    : explorer(rootOp, TraversalAction::RECURSE), solver(explorer, allocator) {
+  explorer.setOpInterfaceAction<mlir::FunctionOpInterface>(
+      TraversalAction::RECURSE);
+  explorer.setDialectAction<mlir::scf::SCFDialect>(TraversalAction::RECURSE);
+  explorer.setDialectAction<IREE::Stream::StreamDialect>(
+      TraversalAction::RECURSE);
+  explorer.setOpAction<IREE::Stream::ExecutableOp>(TraversalAction::IGNORE);
+  explorer.initialize();
+}
+
+LogicalResult EncodingAnalysis::run() {
+  SmallVector<IREE::Util::GlobalOpInterface> globalOps;
+  explorer.forEachGlobal([&](const Explorer::GlobalInfo *globalInfo) {
+    // TODO: Revisit the check, since it is copied from AffinityAnalysis and the
+    // toy IR does not have the case.
+    if (globalInfo->isIndirect || globalInfo->op.isGlobalMutable()) {
+      return;
+    }
+    if (!isa<IREE::Stream::ResourceType>(globalInfo->op.getGlobalType())) {
+      return;
+    }
+    solver.getOrCreateElementFor<GlobalPVS>(
+        Position::forOperation(globalInfo->op));
+    globalOps.push_back(globalInfo->op);
+  });
+
+  // TODO: Expose it as an CLI option.
+  constexpr int64_t kSolverMaxIterations = 10;
+  if (failed(solver.run(kSolverMaxIterations))) {
+    return failure(); // did not converge
+  }
+
+  LLVM_DEBUG({
+    llvm::dbgs()
+        << "\n\n[Analysis] encoding analysis results for the whole module:\n";
+    solver.print(llvm::dbgs());
+    llvm::dbgs() << "\n";
+  });
+
+  for (IREE::Util::GlobalOpInterface globalOp : globalOps) {
+    auto globalPVS =
+        solver.lookupElementFor<GlobalPVS>(Position::forOperation(globalOp));
+    for (auto [sourceOp, encodings] : globalPVS->getAssumedSet()) {
+      if (encodings.empty()) {
+        continue;
+      }
+      globalConsumerLayouts[sourceOp].insert({globalOp, encodings});
+      LLVM_DEBUG({
+        auto sourceGlobalOp = cast<IREE::Util::GlobalOpInterface>(sourceOp);
+        llvm::dbgs() << "GlobalOp:" << sourceGlobalOp.getGlobalName() << "\n";
+        llvm::dbgs() << "\thas consumer: " << globalOp.getGlobalName() << "\n";
+        llvm::dbgs() << "\twith encoding: (";
+        llvm::interleaveComma(encodings, llvm::dbgs(), [&](Attribute value) {
+          value.print(llvm::dbgs());
+        });
+        llvm::dbgs() << ")\n";
+      });
+    }
+  }
+
+  return success();
+}
+
+SmallVector<Item> EncodingAnalysis::lookupGlobalConsumerLayouts(Operation *op) {
+  return globalConsumerLayouts[op].takeVector();
+}
+
+namespace {
+struct UnifyEncodingForGlobalsPass
+    : public impl::UnifyEncodingForGlobalsPassBase<
+          UnifyEncodingForGlobalsPass> {
+  void runOnOperation() override {
+    mlir::ModuleOp moduleOp = getOperation();
+    EncodingAnalysis analysis(moduleOp);
+    if (failed(analysis.run())) {
+      return;
+    }
+  }
+};
+} // namespace
+
+} // namespace mlir::iree_compiler::IREE::Stream
