@@ -47,6 +47,7 @@ iree_cc_library(
     "SpecializeDispatches.cpp"
     "SpecializeEncodings.cpp"
     "SyncInitializers.cpp"
+    "UnifyEncodingForGlobals.cpp"
     "VerifyAffinities.cpp"
     "VerifyAsyncAccessRanges.cpp"
     "VerifyLowerings.cpp"
