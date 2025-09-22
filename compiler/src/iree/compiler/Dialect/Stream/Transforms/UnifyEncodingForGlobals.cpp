@@ -14,12 +14,17 @@
 #include "iree/compiler/Dialect/Util/Analysis/DFX/State.h"
 #include "iree/compiler/Dialect/Util/Analysis/Explorer.h"
 #include "iree/compiler/Dialect/Util/IR/UtilDialect.h"
+#include "iree/compiler/Dialect/Util/IR/UtilOps.h"
 #include "iree/compiler/Dialect/Util/IR/UtilTypes.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/DebugLog.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Pass/Pass.h"
 #include "mlir/Support/LLVM.h"
+#include "mlir/Support/WalkResult.h"
 
 namespace mlir::iree_compiler::IREE::Stream {
 
@@ -37,7 +42,70 @@ namespace {
 // TODO: Tracking the encoding chain may not be needed at this level. It makes
 // sense to use the last encoding instead, since encoding is a hint. You don't
 // expect to relayout a tensor several times in the encode ops chain.
-using Item = std::tuple<IREE::Util::GlobalOpInterface, SmallVector<Attribute>>;
+struct ParameterWrapper {
+  explicit ParameterWrapper(Operation *rootOp) {
+    if (auto global =
+            dyn_cast_if_present<IREE::Util::GlobalOpInterface>(rootOp)) {
+      op = global;
+    } else {
+      // assert(false);
+    }
+  }
+  explicit ParameterWrapper(IREE::Util::GlobalOpInterface rootOp)
+      : op(rootOp) {}
+  explicit ParameterWrapper(std::string str) : parameter(str) {}
+  explicit ParameterWrapper(StringRef str) : parameter(str) {}
+
+  IREE::Util::GlobalOpInterface op;
+  std::string parameter;
+};
+bool operator==(const ParameterWrapper &lhs, const ParameterWrapper &rhs) {
+  return std::tie(lhs.op, lhs.parameter) == std::tie(rhs.op, rhs.parameter);
+}
+static llvm::raw_ostream &operator<<(llvm::raw_ostream &os,
+                                     const ParameterWrapper &wrapper) {
+  if (wrapper.op) {
+    os << "global(" << wrapper.op << ")";
+  } else {
+    os << "parameter(" << wrapper.parameter << ")";
+  }
+  return os;
+}
+} // namespace
+} // namespace mlir::iree_compiler::IREE::Stream
+namespace llvm {
+using mlir::iree_compiler::IREE::Stream::ParameterWrapper;
+template <>
+struct DenseMapInfo<ParameterWrapper> {
+  static inline ParameterWrapper getEmptyKey() {
+    ParameterWrapper empty(nullptr);
+    empty.parameter = "";
+    return empty;
+  }
+  static inline ParameterWrapper getTombstoneKey() {
+    ParameterWrapper empty(nullptr);
+    empty.parameter = "";
+    return empty;
+  }
+  static unsigned getHashValue(const ParameterWrapper &pos) {
+    if (pos.op) {
+      return DenseMapInfo<void *>::getHashValue(pos.op);
+    } else {
+      return DenseMapInfo<StringRef>::getHashValue(pos.parameter);
+    }
+    assert(false);
+    return 0;
+  }
+
+  static bool isEqual(const ParameterWrapper &a, const ParameterWrapper &b) {
+    return a == b;
+  }
+};
+} // namespace llvm
+
+namespace mlir::iree_compiler::IREE::Stream {
+namespace {
+using Item = std::tuple<ParameterWrapper, SmallVector<Attribute>>;
 
 static const std::string
 getLayoutSetAsStr(const DFX::PotentialValuesState<Item> &state,
@@ -52,9 +120,7 @@ getLayoutSetAsStr(const DFX::PotentialValuesState<Item> &state,
       sstream << "undef, ";
     }
     llvm::interleaveComma(state.getAssumedSet(), sstream, [&](Item item) {
-      sstream << "\n\t";
-      sstream << "global=";
-      std::get<0>(item).getGlobalName().print(sstream);
+      sstream << "\n\t" << std::get<0>(item);
       sstream << ", chain=(";
       llvm::interleaveComma(std::get<1>(item), sstream,
                             [&](Attribute value) { value.print(sstream); });
@@ -163,6 +229,37 @@ private:
 };
 const char ValueProducerPVS::ID = 0;
 
+class ValueConsumerPVS
+    : public DFX::StateWrapper<DFX::PotentialValuesState<Item>,
+                               DFX::ValueElement> {
+public:
+  using BaseType =
+      DFX::StateWrapper<DFX::PotentialValuesState<Item>, DFX::ValueElement>;
+  using BaseType::BaseType;
+
+  static ValueConsumerPVS &createForPosition(const Position &pos,
+                                             DFX::Solver &solver) {
+    return *(new (solver.getAllocator()) ValueConsumerPVS(pos));
+  }
+
+  // Identity definitions.
+  const std::string getName() const override { return "ValueConsumerPVS"; }
+  const void *getID() const override { return &ID; }
+  static bool classof(const DFX::AbstractElement *element) {
+    return (element->getID() == &ID);
+  }
+  static const char ID;
+
+  const std::string getAsStr(AsmState &asmState) const override {
+    return getLayoutSetAsStr(getState(), asmState);
+  }
+
+private:
+  void initializeValue(Value value, DFX::Solver &solver) override;
+  ChangeStatus updateValue(Value value, DFX::Solver &solver) override;
+};
+const char ValueConsumerPVS::ID = 0;
+
 //===----------------------------------------------------------------------===//
 // GlobalPVS
 //===----------------------------------------------------------------------===//
@@ -174,7 +271,7 @@ void GlobalPVS::initializeOperation(IREE::Util::GlobalOpInterface globalOp,
     // Cannot perform analysis.
     indicatePessimisticFixpoint();
   } else if (globalInfo) {
-    Item init = {globalInfo->op, {}};
+    Item init = {ParameterWrapper(globalInfo->op), {}};
     unionAssumed(init);
   }
   return;
@@ -222,6 +319,26 @@ ChangeStatus OpPVS::updateOperation(Operation *op, DFX::Solver &solver) {
           newState.unionAssumedWithUndef();
           newState.indicatePessimisticFixpoint();
         }
+      })
+      .Case<IREE::Stream::TensorDispatchOp>([&](auto dispatchOp) {
+        for (Value operand : dispatchOp.getMixedOperands()) {
+          auto &producerPVS = solver.getElementFor<ValueProducerPVS>(
+              *this, Position::forValue(operand), DFX::Resolution::OPTIONAL);
+          LLVM_DEBUG(producerPVS.getAsStr(solver.getAsmState()));
+          newState.unionAssumed(producerPVS.getState());
+          if (producerPVS.isValidState()) {
+            newState.unionAssumed(producerPVS);
+          } else {
+            newState.unionAssumedWithUndef();
+            newState.indicatePessimisticFixpoint();
+          }
+        }
+      })
+      .Case<IREE::Stream::AsyncTransferOp>([&](auto op) {
+        auto sourceState = solver.getElementFor<ValueProducerPVS>(
+            *this, Position::forValue(op.getSource()),
+            DFX::Resolution::OPTIONAL);
+        newState ^= sourceState;
       })
       .Default([](Operation *) { return; });
   return DFX::clampStateAndIndicateChange(getState(), newState);
@@ -284,6 +401,95 @@ ChangeStatus ValueProducerPVS::updateValue(Value value, DFX::Solver &solver) {
                 newState.unionAssumed(item);
               }
             })
+            .Case<IREE::Stream::TensorConstantOp>([&](auto op) {
+              if (auto attr = dyn_cast<IREE::Stream::NamedParameterAttr>(
+                      op.getValue())) {
+                Item item = {ParameterWrapper(attr.getKey()), {}};
+                newState.unionAssumed(item);
+              }
+            })
+            // XXX: It looks wrong to me, because it can result in different
+            // global if the dispatch op is involved.
+            .Case<IREE::Stream::TensorDispatchOp>([&](auto op) {
+              // TODO: Properly filter the ops.
+              if (!isa_and_nonnull<IREE::Util::InitializerOp>(
+                      op->getParentOp())) {
+                return;
+              }
+              for (Value operand : op.getMixedOperands()) {
+                auto sourceState = solver.getElementFor<ValueProducerPVS>(
+                    *this, Position::forValue(operand),
+                    DFX::Resolution::REQUIRED);
+                newState ^= sourceState;
+              }
+            })
+            .Default([&](auto op) {});
+
+        return WalkResult::advance();
+      },
+      (TraversalBehavior::DEFAULT | TraversalBehavior::DONT_WALK_TIED_VALUES));
+  if (traversalResult == TraversalResult::INCOMPLETE) {
+    // Incomplete traversal because of external call graph edges or pointers.
+    newState.unionAssumedWithUndef();
+    newState.indicatePessimisticFixpoint();
+  }
+  return DFX::clampStateAndIndicateChange(getState(), newState);
+}
+
+//===----------------------------------------------------------------------===//
+// ValueConsumerPVS
+//===----------------------------------------------------------------------===//
+
+void ValueConsumerPVS::initializeValue(Value value, DFX::Solver &solver) {}
+
+ChangeStatus ValueConsumerPVS::updateValue(Value value, DFX::Solver &solver) {
+  MLIRContext *ctx = value.getContext();
+  StateType newState;
+  auto traversalResult = TraversalResult::COMPLETE;
+  traversalResult |= solver.getExplorer().walkTransitiveUses(
+      value,
+      [&](OpOperand &operand) {
+        // Special handling for specific ops.
+        TypeSwitch<Operation *>(operand.get().getDefiningOp())
+            .Case<IREE::Util::GlobalLoadOpInterface>([&](auto loadOp) {
+              const Explorer::GlobalInfo *globalInfo =
+                  solver.getExplorer().queryGlobalInfoFrom(
+                      loadOp.getGlobalName(), loadOp);
+              auto &globalPVS = solver.getElementFor<ValueConsumerPVS>(
+                  *this, Position::forOperation(globalInfo->op),
+                  DFX::Resolution::OPTIONAL);
+              newState.unionAssumed(globalPVS);
+            })
+            .Case<IREE::Stream::AsyncTransferOp>([&](auto op) {
+              auto sourceState = solver.getElementFor<ValueConsumerPVS>(
+                  *this, Position::forValue(op.getSource()),
+                  DFX::Resolution::OPTIONAL);
+              newState ^= sourceState;
+            })
+            .Case<IREE::Stream::TensorEncodeOp>([&](auto op) {
+              auto sourceState = solver.getElementFor<ValueConsumerPVS>(
+                  *this, Position::forValue(op.getSource()),
+                  DFX::Resolution::OPTIONAL);
+              auto encodingType =
+                  dyn_cast<RankedTensorType>(op.getResultEncoding());
+              if (!encodingType) {
+                // Bail out if we don't know what to do.
+                return;
+              }
+              Attribute encoding = encodingType.getEncoding();
+              if (!encoding) {
+                encoding = IREE::Encoding::IdentityAttr::get(ctx);
+              }
+              for (auto [globalOp, encodingChain] :
+                   sourceState.getState().getAssumedSet()) {
+                Item item = {globalOp, encodingChain};
+                std::get<1>(item).push_back(encoding);
+                newState.unionAssumed(item);
+              }
+            })
+            //.Case<IREE::Stream::TensorDispatchOp>([&](auto op) {
+
+            //})
             .Default([&](auto op) {});
 
         return WalkResult::advance();
@@ -308,13 +514,25 @@ public:
 
   LogicalResult run();
 
-  SmallVector<Item> lookupGlobalConsumerLayouts(Operation *op);
+  SmallVector<ParameterWrapper> getGlobalOps() {
+    return llvm::to_vector(globalConsumerLayouts.keys());
+  }
+
+  SmallVector<Item> lookupGlobalConsumerLayouts(ParameterWrapper op);
+
+  SmallVector<ParameterWrapper>
+  lookupGlobalInputs(IREE::Stream::TensorDispatchOp dispatchOp);
+
+  std::optional<ParameterWrapper>
+  getSourceGlobal(IREE::Util::GlobalOpInterface op);
 
 private:
   Explorer explorer;
   llvm::BumpPtrAllocator allocator;
   DFX::Solver solver;
-  DenseMap<Operation *, llvm::SmallSetVector<Item, 4>> globalConsumerLayouts;
+  SmallVector<IREE::Util::GlobalOpInterface> globalOps;
+  DenseMap<ParameterWrapper, llvm::SmallSetVector<Item, 4>>
+      globalConsumerLayouts;
 };
 }; // namespace
 
@@ -330,7 +548,6 @@ EncodingAnalysis::EncodingAnalysis(Operation *rootOp)
 }
 
 LogicalResult EncodingAnalysis::run() {
-  SmallVector<IREE::Util::GlobalOpInterface> globalOps;
   explorer.forEachGlobal([&](const Explorer::GlobalInfo *globalInfo) {
     // TODO: Revisit the check, since it is copied from AffinityAnalysis and the
     // toy IR does not have the case.
@@ -343,6 +560,12 @@ LogicalResult EncodingAnalysis::run() {
     solver.getOrCreateElementFor<GlobalPVS>(
         Position::forOperation(globalInfo->op));
     globalOps.push_back(globalInfo->op);
+  });
+
+  explorer.forEachFunctionLikeOp([&](FunctionOpInterface funcOp) {
+    funcOp.walk([&](IREE::Stream::TensorDispatchOp op) {
+      solver.getOrCreateElementFor<OpPVS>(Position::forOperation(op));
+    });
   });
 
   // TODO: Expose it as an CLI option.
@@ -362,13 +585,10 @@ LogicalResult EncodingAnalysis::run() {
     auto globalPVS =
         solver.lookupElementFor<GlobalPVS>(Position::forOperation(globalOp));
     for (auto [sourceOp, encodings] : globalPVS->getAssumedSet()) {
-      if (encodings.empty()) {
-        continue;
-      }
-      globalConsumerLayouts[sourceOp].insert({globalOp, encodings});
+      globalConsumerLayouts[sourceOp].insert(
+          {ParameterWrapper(globalOp), encodings});
       LLVM_DEBUG({
-        auto sourceGlobalOp = cast<IREE::Util::GlobalOpInterface>(sourceOp);
-        llvm::dbgs() << "GlobalOp:" << sourceGlobalOp.getGlobalName() << "\n";
+        llvm::dbgs() << "GlobalOp:" << sourceOp << "\n";
         llvm::dbgs() << "\thas consumer: " << globalOp.getGlobalName() << "\n";
         llvm::dbgs() << "\twith encoding: (";
         llvm::interleaveComma(encodings, llvm::dbgs(), [&](Attribute value) {
@@ -379,11 +599,50 @@ LogicalResult EncodingAnalysis::run() {
     }
   }
 
+  explorer.forEachFunctionLikeOp([&](FunctionOpInterface funcOp) {
+    funcOp.walk([&](IREE::Stream::TensorDispatchOp op) {
+      SmallVector<ParameterWrapper> globals = lookupGlobalInputs(op);
+      LLVM_DEBUG({
+        llvm::dbgs() << "TensorDispatchOp: " << op << "\n";
+        for (auto global : globals) {
+          llvm::dbgs() << "\t" << global << "\n";
+        }
+      });
+    });
+  });
+
   return success();
 }
 
-SmallVector<Item> EncodingAnalysis::lookupGlobalConsumerLayouts(Operation *op) {
+SmallVector<ParameterWrapper> EncodingAnalysis::lookupGlobalInputs(
+    IREE::Stream::TensorDispatchOp dispatchOp) {
+  llvm::SmallSetVector<ParameterWrapper, 4> result;
+  auto dispatchOpPVS =
+      solver.getOrCreateElementFor<OpPVS>(Position::forOperation(dispatchOp));
+  for (auto [globalOp, encodings] : dispatchOpPVS.getAssumedSet()) {
+    result.insert(globalOp);
+  }
+  return result.takeVector();
+}
+
+SmallVector<Item>
+EncodingAnalysis::lookupGlobalConsumerLayouts(ParameterWrapper op) {
   return globalConsumerLayouts[op].takeVector();
+}
+
+std::optional<ParameterWrapper>
+EncodingAnalysis::getSourceGlobal(IREE::Util::GlobalOpInterface op) {
+  std::optional<ParameterWrapper> result;
+  auto globalPVS =
+      solver.lookupElementFor<GlobalPVS>(Position::forOperation(op));
+  for (auto [sourceOp, encodings] : globalPVS->getAssumedSet()) {
+    if (result) {
+      assert(false && "expect to be initialized once");
+      return std::nullopt;
+    }
+    result = sourceOp;
+  }
+  return result;
 }
 
 namespace {
@@ -395,6 +654,20 @@ struct UnifyEncodingForGlobalsPass
     EncodingAnalysis analysis(moduleOp);
     if (failed(analysis.run())) {
       return;
+    }
+    for (auto globalOp : analysis.getGlobalOps()) {
+      LLVM_DEBUG(llvm::dbgs() << "--GlobalOp:" << globalOp << "\n";);
+      for (auto [sourceOp, encodings] :
+           analysis.lookupGlobalConsumerLayouts(globalOp)) {
+        LLVM_DEBUG({
+          llvm::dbgs() << "\thas consumer: " << globalOp << "\n";
+          llvm::dbgs() << "\twith encoding: (";
+          llvm::interleaveComma(encodings, llvm::dbgs(), [&](Attribute value) {
+            value.print(llvm::dbgs());
+          });
+          llvm::dbgs() << ")\n";
+        });
+      }
     }
   }
 };
