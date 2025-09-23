@@ -198,6 +198,35 @@ private:
 };
 const char OpPVS::ID = 0;
 
+class DirectOpPVS : public DFX::StateWrapper<DFX::PotentialValuesState<Item>,
+                                       DFX::OperationElement> {
+public:
+  using BaseType =
+      DFX::StateWrapper<DFX::PotentialValuesState<Item>, DFX::OperationElement>;
+  using BaseType::BaseType;
+
+  static DirectOpPVS &createForPosition(const Position &pos, DFX::Solver &solver) {
+    return *(new (solver.getAllocator()) DirectOpPVS(pos));
+  }
+
+  // Identity definitions.
+  const std::string getName() const override { return "DirectOpPVS"; }
+  const void *getID() const override { return &ID; }
+  static bool classof(const DFX::AbstractElement *element) {
+    return (element->getID() == &ID);
+  }
+  static const char ID;
+
+  const std::string getAsStr(AsmState &asmState) const override {
+    return getLayoutSetAsStr(getState(), asmState);
+  }
+
+private:
+  void initializeOperation(Operation *op, DFX::Solver &solver) override;
+  ChangeStatus updateOperation(Operation *op, DFX::Solver &solver) override;
+};
+const char DirectOpPVS::ID = 0;
+
 class ValueProducerPVS
     : public DFX::StateWrapper<DFX::PotentialValuesState<Item>,
                                DFX::ValueElement> {
@@ -229,6 +258,40 @@ private:
 };
 const char ValueProducerPVS::ID = 0;
 
+class DirectValueProducerPVS
+    : public DFX::StateWrapper<DFX::PotentialValuesState<Item>,
+                               DFX::ValueElement> {
+public:
+  using BaseType =
+      DFX::StateWrapper<DFX::PotentialValuesState<Item>, DFX::ValueElement>;
+  using BaseType::BaseType;
+
+  static DirectValueProducerPVS &createForPosition(const Position &pos,
+                                                   DFX::Solver &solver) {
+    return *(new (solver.getAllocator()) DirectValueProducerPVS(pos));
+  }
+
+  // Identity definitions.
+  const std::string getName() const override {
+    return "DirectValueProducerPVS";
+  }
+  const void *getID() const override { return &ID; }
+  static bool classof(const DFX::AbstractElement *element) {
+    return (element->getID() == &ID);
+  }
+  static const char ID;
+
+  const std::string getAsStr(AsmState &asmState) const override {
+    return getLayoutSetAsStr(getState(), asmState);
+  }
+
+private:
+  void initializeValue(Value value, DFX::Solver &solver) override;
+  ChangeStatus updateValue(Value value, DFX::Solver &solver) override;
+};
+const char DirectValueProducerPVS::ID = 0;
+
+#if 0
 class ValueConsumerPVS
     : public DFX::StateWrapper<DFX::PotentialValuesState<Item>,
                                DFX::ValueElement> {
@@ -259,6 +322,7 @@ private:
   ChangeStatus updateValue(Value value, DFX::Solver &solver) override;
 };
 const char ValueConsumerPVS::ID = 0;
+#endif
 
 //===----------------------------------------------------------------------===//
 // GlobalPVS
@@ -345,6 +409,39 @@ ChangeStatus OpPVS::updateOperation(Operation *op, DFX::Solver &solver) {
 }
 
 //===----------------------------------------------------------------------===//
+// DirectOpPVS
+//===----------------------------------------------------------------------===//
+
+void DirectOpPVS::initializeOperation(Operation *op, DFX::Solver &solver) {}
+
+ChangeStatus DirectOpPVS::updateOperation(Operation *op, DFX::Solver &solver) {
+  StateType newState;
+  TypeSwitch<Operation *>(op)
+      .Case<IREE::Stream::TensorDispatchOp>([&](auto dispatchOp) {
+        for (Value operand : dispatchOp.getMixedOperands()) {
+          auto &producerPVS = solver.getElementFor<DirectValueProducerPVS>(
+              *this, Position::forValue(operand), DFX::Resolution::OPTIONAL);
+          LLVM_DEBUG(producerPVS.getAsStr(solver.getAsmState()));
+          newState.unionAssumed(producerPVS.getState());
+          if (producerPVS.isValidState()) {
+            newState.unionAssumed(producerPVS);
+          } else {
+            newState.unionAssumedWithUndef();
+            newState.indicatePessimisticFixpoint();
+          }
+        }
+      })
+      .Case<IREE::Stream::AsyncTransferOp>([&](auto op) {
+        auto sourceState = solver.getElementFor<DirectValueProducerPVS>(
+            *this, Position::forValue(op.getSource()),
+            DFX::Resolution::OPTIONAL);
+        newState ^= sourceState;
+      })
+      .Default([](Operation *) { return; });
+  return DFX::clampStateAndIndicateChange(getState(), newState);
+}
+
+//===----------------------------------------------------------------------===//
 // ValueProducerPVS
 //===----------------------------------------------------------------------===//
 
@@ -360,6 +457,8 @@ ChangeStatus ValueProducerPVS::updateValue(Value value, DFX::Solver &solver) {
         if (isa<CallOpInterface>(result.getOwner())) {
           return WalkResult::advance();
         }
+        LDBG() << "walk " << value;
+        LDBG() << "\tmay be defined by: " << *result.getOwner();
 
         // TODO: Handle interface ops, if any.
 
@@ -373,6 +472,8 @@ ChangeStatus ValueProducerPVS::updateValue(Value value, DFX::Solver &solver) {
                   *this, Position::forOperation(globalInfo->op),
                   DFX::Resolution::REQUIRED);
               newState.unionAssumed(globalPVS);
+              //Item item = {ParameterWrapper(globalInfo->op), {}};
+              //newState.unionAssumed(item);
             })
             .Case<IREE::Stream::AsyncTransferOp>([&](auto op) {
               auto sourceState = solver.getElementFor<ValueProducerPVS>(
@@ -437,9 +538,70 @@ ChangeStatus ValueProducerPVS::updateValue(Value value, DFX::Solver &solver) {
 }
 
 //===----------------------------------------------------------------------===//
+// DirectValueProducerPVS
+//===----------------------------------------------------------------------===//
+
+void DirectValueProducerPVS::initializeValue(Value value, DFX::Solver &solver) {}
+
+ChangeStatus DirectValueProducerPVS::updateValue(Value value,
+                                                 DFX::Solver &solver) {
+  MLIRContext *ctx = value.getContext();
+  StateType newState;
+  Operation *producer = value.getDefiningOp();
+  if (!producer) {
+    return DFX::clampStateAndIndicateChange(getState(), newState);
+  }
+  TypeSwitch<Operation *>(producer)
+      .Case<IREE::Util::GlobalLoadOpInterface>([&](auto loadOp) {
+        const Explorer::GlobalInfo *globalInfo =
+            solver.getExplorer().queryGlobalInfoFrom(loadOp.getGlobalName(),
+                                                     loadOp);
+        Item item = {ParameterWrapper(globalInfo->op), {}};
+        newState.unionAssumed(item);
+      })
+      .Case<IREE::Stream::AsyncTransferOp>([&](auto op) {
+        auto sourceState = solver.getElementFor<DirectValueProducerPVS>(
+            *this, Position::forValue(op.getSource()),
+            DFX::Resolution::REQUIRED);
+        newState ^= sourceState;
+      })
+      .Case<IREE::Stream::TensorEncodeOp>([&](auto op) {
+        auto sourceState = solver.getElementFor<DirectValueProducerPVS>(
+            *this, Position::forValue(op.getSource()),
+            DFX::Resolution::REQUIRED);
+        auto encodingType = dyn_cast<RankedTensorType>(op.getResultEncoding());
+        if (!encodingType) {
+          // Bail out if we don't know what to do.
+          return;
+        }
+        Attribute encoding = encodingType.getEncoding();
+        if (!encoding) {
+          encoding = IREE::Encoding::IdentityAttr::get(ctx);
+        }
+        for (auto [globalOp, encodingChain] :
+             sourceState.getState().getAssumedSet()) {
+          Item item = {globalOp, encodingChain};
+          std::get<1>(item).push_back(encoding);
+          newState.unionAssumed(item);
+        }
+      })
+      .Case<IREE::Stream::TensorConstantOp>([&](auto op) {
+        if (auto attr =
+                dyn_cast<IREE::Stream::NamedParameterAttr>(op.getValue())) {
+          Item item = {ParameterWrapper(attr.getKey()), {}};
+          newState.unionAssumed(item);
+        }
+      })
+      .Default([&](auto op) {});
+
+  return DFX::clampStateAndIndicateChange(getState(), newState);
+}
+
+//===----------------------------------------------------------------------===//
 // ValueConsumerPVS
 //===----------------------------------------------------------------------===//
 
+#if 0
 void ValueConsumerPVS::initializeValue(Value value, DFX::Solver &solver) {}
 
 ChangeStatus ValueConsumerPVS::updateValue(Value value, DFX::Solver &solver) {
@@ -502,6 +664,7 @@ ChangeStatus ValueConsumerPVS::updateValue(Value value, DFX::Solver &solver) {
   }
   return DFX::clampStateAndIndicateChange(getState(), newState);
 }
+#endif
 
 //===----------------------------------------------------------------------===//
 // EncodingAnalysis
@@ -564,7 +727,7 @@ LogicalResult EncodingAnalysis::run() {
 
   explorer.forEachFunctionLikeOp([&](FunctionOpInterface funcOp) {
     funcOp.walk([&](IREE::Stream::TensorDispatchOp op) {
-      solver.getOrCreateElementFor<OpPVS>(Position::forOperation(op));
+      solver.getOrCreateElementFor<DirectOpPVS>(Position::forOperation(op));
     });
   });
 
@@ -590,7 +753,7 @@ LogicalResult EncodingAnalysis::run() {
       LLVM_DEBUG({
         llvm::dbgs() << "GlobalOp:" << sourceOp << "\n";
         llvm::dbgs() << "\thas consumer: " << globalOp.getGlobalName() << "\n";
-        llvm::dbgs() << "\twith encoding: (";
+        llvm::dbgs() << "\twhere the encoding is (";
         llvm::interleaveComma(encodings, llvm::dbgs(), [&](Attribute value) {
           value.print(llvm::dbgs());
         });
@@ -617,8 +780,8 @@ LogicalResult EncodingAnalysis::run() {
 SmallVector<ParameterWrapper> EncodingAnalysis::lookupGlobalInputs(
     IREE::Stream::TensorDispatchOp dispatchOp) {
   llvm::SmallSetVector<ParameterWrapper, 4> result;
-  auto dispatchOpPVS =
-      solver.getOrCreateElementFor<OpPVS>(Position::forOperation(dispatchOp));
+  auto dispatchOpPVS = solver.getOrCreateElementFor<DirectOpPVS>(
+      Position::forOperation(dispatchOp));
   for (auto [globalOp, encodings] : dispatchOpPVS.getAssumedSet()) {
     result.insert(globalOp);
   }
@@ -657,11 +820,11 @@ struct UnifyEncodingForGlobalsPass
     }
     for (auto globalOp : analysis.getGlobalOps()) {
       LLVM_DEBUG(llvm::dbgs() << "--GlobalOp:" << globalOp << "\n";);
-      for (auto [sourceOp, encodings] :
+      for (auto [consumerOp, encodings] :
            analysis.lookupGlobalConsumerLayouts(globalOp)) {
         LLVM_DEBUG({
-          llvm::dbgs() << "\thas consumer: " << globalOp << "\n";
-          llvm::dbgs() << "\twith encoding: (";
+          llvm::dbgs() << "\thas consumer: " << consumerOp << "\n";
+          llvm::dbgs() << "\twhere the encoding is (";
           llvm::interleaveComma(encodings, llvm::dbgs(), [&](Attribute value) {
             value.print(llvm::dbgs());
           });
