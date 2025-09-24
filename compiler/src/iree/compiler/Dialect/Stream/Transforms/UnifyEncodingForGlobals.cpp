@@ -686,8 +686,7 @@ public:
   SmallVector<ParameterWrapper>
   lookupGlobalInputs(IREE::Stream::TensorDispatchOp dispatchOp);
 
-  std::optional<ParameterWrapper>
-  getSourceGlobal(IREE::Util::GlobalOpInterface op);
+  std::optional<ParameterWrapper> getSourceGlobal(ParameterWrapper op);
 
 private:
   Explorer explorer;
@@ -696,6 +695,8 @@ private:
   SmallVector<IREE::Util::GlobalOpInterface> globalOps;
   DenseMap<ParameterWrapper, llvm::SmallSetVector<Item, 4>>
       globalConsumerLayouts;
+  DenseMap<ParameterWrapper, SmallVector<IREE::Stream::TensorDispatchOp>>
+      tensorDispatchUsersFromGlobal;
 };
 }; // namespace
 
@@ -763,6 +764,11 @@ LogicalResult EncodingAnalysis::run() {
   }
 
   explorer.forEachFunctionLikeOp([&](FunctionOpInterface funcOp) {
+    // Skip Initializer for now.
+    // TODO: Check if we need it.
+    if (isa<IREE::Util::InitializerOp>(funcOp)) {
+      return;
+    }
     funcOp.walk([&](IREE::Stream::TensorDispatchOp op) {
       SmallVector<ParameterWrapper> globals = lookupGlobalInputs(op);
       LLVM_DEBUG({
@@ -771,6 +777,9 @@ LogicalResult EncodingAnalysis::run() {
           llvm::dbgs() << "\t" << global << "\n";
         }
       });
+      for (auto global : globals) {
+        tensorDispatchUsersFromGlobal[global].push_back(op);
+      }
     });
   });
 
@@ -794,11 +803,25 @@ EncodingAnalysis::lookupGlobalConsumerLayouts(ParameterWrapper op) {
 }
 
 std::optional<ParameterWrapper>
-EncodingAnalysis::getSourceGlobal(IREE::Util::GlobalOpInterface op) {
+EncodingAnalysis::getSourceGlobal(ParameterWrapper op) {
+  if (!op.op) {
+    // Parameter is always the source.
+    return op;
+  }
   std::optional<ParameterWrapper> result;
   auto globalPVS =
-      solver.lookupElementFor<GlobalPVS>(Position::forOperation(op));
+      solver.lookupElementFor<GlobalPVS>(Position::forOperation(op.op));
+  LLVM_DEBUG(llvm::dbgs() << "Looking up source global for:"
+                          << *op.op.getOperation() << "\n";);
   for (auto [sourceOp, encodings] : globalPVS->getAssumedSet()) {
+    if (sourceOp == op) {
+      LLVM_DEBUG(llvm::dbgs() << "Skip self as source" << "\n");
+      continue;
+    }
+    if (!encodings.empty()) {
+      continue;
+    }
+    LLVM_DEBUG({ llvm::dbgs() << "Candidate:" << sourceOp << "\n"; });
     if (result) {
       assert(false && "expect to be initialized once");
       return std::nullopt;
@@ -819,7 +842,18 @@ struct UnifyEncodingForGlobalsPass
       return;
     }
     for (auto globalOp : analysis.getGlobalOps()) {
+      std::optional<ParameterWrapper> sourceGlobal =
+          analysis.getSourceGlobal(globalOp);
       LLVM_DEBUG(llvm::dbgs() << "--GlobalOp:" << globalOp << "\n";);
+      LLVM_DEBUG({
+        llvm::dbgs() << "\tSource: ";
+        if (sourceGlobal) {
+          llvm::dbgs() << sourceGlobal.value();
+        } else {
+          llvm::dbgs() << "self";
+        }
+        llvm::dbgs() << "\n";
+      });
       for (auto [consumerOp, encodings] :
            analysis.lookupGlobalConsumerLayouts(globalOp)) {
         LLVM_DEBUG({
