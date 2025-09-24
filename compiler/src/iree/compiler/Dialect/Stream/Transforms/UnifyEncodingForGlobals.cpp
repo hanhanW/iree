@@ -104,6 +104,32 @@ struct DenseMapInfo<ParameterWrapper> {
 } // namespace llvm
 
 namespace mlir::iree_compiler::IREE::Stream {
+
+namespace {
+/// Returns a stably sorted list of dialect interfaces of T for all dialects
+/// used within the given module.
+template <typename T>
+SmallVector<const T *> gatherUsedDialectInterfaces(mlir::ModuleOp moduleOp) {
+  SmallPtrSet<const T *, 4> resultSet;
+  for (auto dialect : moduleOp.getContext()->getLoadedDialects()) {
+    auto *dialectInterface = dialect->getRegisteredInterface<T>();
+    if (!dialectInterface)
+      continue;
+    resultSet.insert(dialectInterface);
+  }
+
+  // NOTE: to ensure deterministic output we sort the result so that imports are
+  // always added in a consistent order.
+  auto results = llvm::to_vector_of<const T *>(resultSet);
+  llvm::sort(
+      results, +[](const T *a, const T *b) {
+        return a->getDialect()->getNamespace().compare(
+                   b->getDialect()->getNamespace()) < 0;
+      });
+  return results;
+}
+} // namespace
+
 namespace {
 using Item = std::tuple<ParameterWrapper, SmallVector<Attribute>>;
 
@@ -126,6 +152,41 @@ getLayoutSetAsStr(const DFX::PotentialValuesState<Item> &state,
                             [&](Attribute value) { value.print(sstream); });
       sstream << ")";
     });
+    sstream << "]";
+  } else {
+    sstream << "(invalid)";
+  }
+  sstream.flush();
+  return str;
+}
+
+constexpr int kUnknown = -1;
+using ParameterAndOpOperand = std::tuple<ParameterWrapper, int>;
+static llvm::raw_ostream &operator<<(llvm::raw_ostream &os,
+                                     const ParameterAndOpOperand &wrapper) {
+  os << "(param: " << std::get<0>(wrapper);
+  os << ", operandIdx: " << std::get<1>(wrapper) << ")";
+  return os;
+}
+
+static const std::string
+getLayoutSetAsStr(const DFX::PotentialValuesState<ParameterAndOpOperand> &state,
+                  AsmState &asmState) {
+  DenseSet<ParameterAndOpOperand, DenseMapInfo<ParameterAndOpOperand>>
+      assumedSet = state.getAssumedSet();
+  std::string str;
+  llvm::raw_string_ostream sstream(str);
+  sstream << "pvs: ";
+  if (state.isValidState()) {
+    sstream << "[";
+    if (state.isUndefContained()) {
+      sstream << "undef, ";
+    }
+    llvm::interleaveComma(state.getAssumedSet(), sstream,
+                          [&](ParameterAndOpOperand item) {
+                            sstream << "\n\t" << std::get<0>(item);
+                            sstream << "idx: " << std::get<1>(item) << ")";
+                          });
     sstream << "]";
   } else {
     sstream << "(invalid)";
@@ -198,11 +259,13 @@ private:
 };
 const char OpPVS::ID = 0;
 
-class DirectOpPVS : public DFX::StateWrapper<DFX::PotentialValuesState<Item>,
-                                       DFX::OperationElement> {
+class DirectOpPVS
+    : public DFX::StateWrapper<DFX::PotentialValuesState<ParameterAndOpOperand>,
+                               DFX::OperationElement> {
 public:
   using BaseType =
-      DFX::StateWrapper<DFX::PotentialValuesState<Item>, DFX::OperationElement>;
+      DFX::StateWrapper<DFX::PotentialValuesState<ParameterAndOpOperand>,
+                        DFX::OperationElement>;
   using BaseType::BaseType;
 
   static DirectOpPVS &createForPosition(const Position &pos, DFX::Solver &solver) {
@@ -259,11 +322,12 @@ private:
 const char ValueProducerPVS::ID = 0;
 
 class DirectValueProducerPVS
-    : public DFX::StateWrapper<DFX::PotentialValuesState<Item>,
+    : public DFX::StateWrapper<DFX::PotentialValuesState<ParameterAndOpOperand>,
                                DFX::ValueElement> {
 public:
   using BaseType =
-      DFX::StateWrapper<DFX::PotentialValuesState<Item>, DFX::ValueElement>;
+      DFX::StateWrapper<DFX::PotentialValuesState<ParameterAndOpOperand>,
+                        DFX::ValueElement>;
   using BaseType::BaseType;
 
   static DirectValueProducerPVS &createForPosition(const Position &pos,
@@ -418,16 +482,16 @@ ChangeStatus DirectOpPVS::updateOperation(Operation *op, DFX::Solver &solver) {
   StateType newState;
   TypeSwitch<Operation *>(op)
       .Case<IREE::Stream::TensorDispatchOp>([&](auto dispatchOp) {
-        for (Value operand : dispatchOp.getMixedOperands()) {
+        for (auto [idx, operand] :
+             llvm::enumerate(dispatchOp.getMixedOperands())) {
           auto &producerPVS = solver.getElementFor<DirectValueProducerPVS>(
               *this, Position::forValue(operand), DFX::Resolution::OPTIONAL);
           LLVM_DEBUG(producerPVS.getAsStr(solver.getAsmState()));
-          newState.unionAssumed(producerPVS.getState());
-          if (producerPVS.isValidState()) {
-            newState.unionAssumed(producerPVS);
-          } else {
-            newState.unionAssumedWithUndef();
-            newState.indicatePessimisticFixpoint();
+          SmallVector<ParameterAndOpOperand> newSet;
+          for (const auto [globalOp, opOperand] :
+               producerPVS.getState().getAssumedSet()) {
+            (void)opOperand;
+            newState.unionAssumed(ParameterAndOpOperand{globalOp, idx});
           }
         }
       })
@@ -556,7 +620,8 @@ ChangeStatus DirectValueProducerPVS::updateValue(Value value,
         const Explorer::GlobalInfo *globalInfo =
             solver.getExplorer().queryGlobalInfoFrom(loadOp.getGlobalName(),
                                                      loadOp);
-        Item item = {ParameterWrapper(globalInfo->op), {}};
+        ParameterAndOpOperand item = {ParameterWrapper(globalInfo->op),
+                                      kUnknown};
         newState.unionAssumed(item);
       })
       .Case<IREE::Stream::AsyncTransferOp>([&](auto op) {
@@ -578,17 +643,16 @@ ChangeStatus DirectValueProducerPVS::updateValue(Value value,
         if (!encoding) {
           encoding = IREE::Encoding::IdentityAttr::get(ctx);
         }
-        for (auto [globalOp, encodingChain] :
-             sourceState.getState().getAssumedSet()) {
-          Item item = {globalOp, encodingChain};
-          std::get<1>(item).push_back(encoding);
+        for (auto [globalOp, _] : sourceState.getState().getAssumedSet()) {
+          ParameterAndOpOperand item = {globalOp, kUnknown};
           newState.unionAssumed(item);
         }
       })
       .Case<IREE::Stream::TensorConstantOp>([&](auto op) {
         if (auto attr =
                 dyn_cast<IREE::Stream::NamedParameterAttr>(op.getValue())) {
-          Item item = {ParameterWrapper(attr.getKey()), {}};
+          ParameterAndOpOperand item = {ParameterWrapper(attr.getKey()),
+                                        kUnknown};
           newState.unionAssumed(item);
         }
       })
@@ -683,10 +747,13 @@ public:
 
   SmallVector<Item> lookupGlobalConsumerLayouts(ParameterWrapper op);
 
-  SmallVector<ParameterWrapper>
+  SmallVector<ParameterAndOpOperand>
   lookupGlobalInputs(IREE::Stream::TensorDispatchOp dispatchOp);
 
   std::optional<ParameterWrapper> getSourceGlobal(ParameterWrapper op);
+
+  SmallVector<IREE::Stream::TensorDispatchOp>
+  lookupDispatchUsers(ParameterWrapper op);
 
 private:
   Explorer explorer;
@@ -726,6 +793,8 @@ LogicalResult EncodingAnalysis::run() {
     globalOps.push_back(globalInfo->op);
   });
 
+  // TODO: I guess propagating from load ops may be more efficient. I'm not sure
+  // if it works though. It is just a prototype, so it will be revisited later.
   explorer.forEachFunctionLikeOp([&](FunctionOpInterface funcOp) {
     funcOp.walk([&](IREE::Stream::TensorDispatchOp op) {
       solver.getOrCreateElementFor<DirectOpPVS>(Position::forOperation(op));
@@ -770,14 +839,15 @@ LogicalResult EncodingAnalysis::run() {
       return;
     }
     funcOp.walk([&](IREE::Stream::TensorDispatchOp op) {
-      SmallVector<ParameterWrapper> globals = lookupGlobalInputs(op);
+      SmallVector<ParameterAndOpOperand> globals = lookupGlobalInputs(op);
       LLVM_DEBUG({
         llvm::dbgs() << "TensorDispatchOp: " << op << "\n";
         for (auto global : globals) {
           llvm::dbgs() << "\t" << global << "\n";
         }
       });
-      for (auto global : globals) {
+      for (auto [global, operandIdx] : globals) {
+        (void)operandIdx;
         tensorDispatchUsersFromGlobal[global].push_back(op);
       }
     });
@@ -786,20 +856,20 @@ LogicalResult EncodingAnalysis::run() {
   return success();
 }
 
-SmallVector<ParameterWrapper> EncodingAnalysis::lookupGlobalInputs(
+SmallVector<ParameterAndOpOperand> EncodingAnalysis::lookupGlobalInputs(
     IREE::Stream::TensorDispatchOp dispatchOp) {
-  llvm::SmallSetVector<ParameterWrapper, 4> result;
+  llvm::SmallSetVector<ParameterAndOpOperand, 4> result;
   auto dispatchOpPVS = solver.getOrCreateElementFor<DirectOpPVS>(
       Position::forOperation(dispatchOp));
-  for (auto [globalOp, encodings] : dispatchOpPVS.getAssumedSet()) {
-    result.insert(globalOp);
+  for (auto [globalOp, operandIdx] : dispatchOpPVS.getAssumedSet()) {
+    result.insert({globalOp, operandIdx});
   }
-  return result.takeVector();
+  return llvm::to_vector(result);
 }
 
 SmallVector<Item>
 EncodingAnalysis::lookupGlobalConsumerLayouts(ParameterWrapper op) {
-  return globalConsumerLayouts[op].takeVector();
+  return llvm::to_vector(globalConsumerLayouts[op]);
 }
 
 std::optional<ParameterWrapper>
@@ -829,6 +899,11 @@ EncodingAnalysis::getSourceGlobal(ParameterWrapper op) {
     result = sourceOp;
   }
   return result;
+}
+
+SmallVector<IREE::Stream::TensorDispatchOp>
+EncodingAnalysis::lookupDispatchUsers(ParameterWrapper op) {
+  return tensorDispatchUsersFromGlobal[op];
 }
 
 namespace {
@@ -864,6 +939,125 @@ struct UnifyEncodingForGlobalsPass
           });
           llvm::dbgs() << ")\n";
         });
+      }
+    }
+
+    IREE::Stream::AffinityAnalysis affinityAnalysis(moduleOp);
+    if (failed(affinityAnalysis.run())) {
+      LLVM_DEBUG(llvm::dbgs() << "failed on running affinity analysis\n");
+      return;
+    }
+
+    auto usedDialects = gatherUsedDialectInterfaces<
+        IREE::Stream::AffinityAnalysisDialectInterface>(moduleOp);
+    if (usedDialects.size() != 1) {
+      LLVM_DEBUG(llvm::dbgs() << "expected only one dialect implementing "
+                                 "AffinityAnalysisDialectInterface\n");
+      return;
+    }
+    IREE::Stream::ResolveLayoutAttrFn resolveLayoutAttr =
+        usedDialects[0]->makeLayoutAttrResolver(moduleOp);
+
+    // Step 1. Select a common encoding for each global/parameter.
+    // TODO: Extend the consumer global users with affinity:
+    //         - Iterate all the source globals that have more than one
+    //         consumer layouts (including its users because plain layout is
+    //         also a layout):
+    //         - If they have the same encoding resolver, query the resolver
+    //         for encoding preference by passing a list of encodings.
+    //         - If multiple encoding resolvers are present, randomly select a
+    //         encoding. This may be the entry point of specializing encoding
+    //         module for each target device (which is a list).
+    //         TODO: Implement heuritic, maybe look up the number of uses.
+    //         Note: it may be okay to have dup globals if they belong
+    //         different targets. As long as they are come from data-tiling,
+    //         they already need a buffer to hold the parameters. It may be
+    //         true for non data-tiling cases as well.
+    // Step 2.
+    // - Create a new global with the selected encoding.
+    // - Track all the consumers and replace the use chain with the new
+    //   encoded global.
+    // - Meanwhile, update the encodings for dispatch bindings. Two options:
+    //   * Only replace the encodings in iree_tensor_ext load/store.
+    //   * Insert unset_encoding + set_encoding right after/before load/store.
+    //   Question: can this happen before encoding specialization? Do we need
+    //   to duplicate the dispatches based on needs? I think the answer is
+    //   yes, it can happen before encoding specialization, because it does
+    //   not break the assumptions. Note: we can do it != it is the solution.
+    for (auto globalOp : analysis.getGlobalOps()) {
+      LDBG() << "resolving " << globalOp;
+      std::optional<ParameterWrapper> sourceGlobal =
+          analysis.getSourceGlobal(globalOp);
+      if (!sourceGlobal) {
+        LDBG() << "skip, because it is not a source global";
+        continue;
+      }
+      SmallVector<IREE::Stream::TensorDispatchOp> users;
+      SmallVector<ParameterWrapper> consumers;
+      for (auto [consumerOp, encoding] :
+           analysis.lookupGlobalConsumerLayouts(globalOp)) {
+        users.append(analysis.lookupDispatchUsers(consumerOp));
+        (void)encoding;
+      }
+
+      SmallVector<IREE::Stream::AffinityAndOpPair> queries;
+      for (IREE::Stream::TensorDispatchOp dispatchOp : users) {
+        LDBG() << "processing " << dispatchOp;
+        for (auto [param, idx] : analysis.lookupGlobalInputs(dispatchOp)) {
+          queries.emplace_back(dispatchOp.getAffinityAttr(), dispatchOp);
+          std::optional<ParameterWrapper> paramSourceGlobal =
+              analysis.getSourceGlobal(param);
+          if (!paramSourceGlobal ||
+              !(paramSourceGlobal.value() == sourceGlobal.value())) {
+            continue;
+          }
+          Value operand = dispatchOp.getMixedOperands()[idx];
+          auto type =
+              cast<TypeAttr>(dispatchOp.getOperandEncodings().getValue()[idx])
+                  .getValue();
+          // Skip if the operand type is not AffinityType.
+          if (!isa<IREE::Stream::AffinityTypeInterface>(type)) {
+            continue;
+          }
+          SmallVector<IREE::Stream::AffinityAttr> affinityAttrs;
+          if (!affinityAnalysis.tryLookupResourceAffinity(operand,
+                                                          affinityAttrs)) {
+            LDBG() << "failed to determine resource affinity for operand "
+                   << operand;
+            assert(false);
+            return;
+          }
+          for (auto affinity : affinityAttrs) {
+            queries.emplace_back(affinity, dispatchOp);
+          }
+        }
+      }
+      llvm::DenseMap<IREE::Stream::AffinityAndOpPair, SetVector<Attribute>>
+          cachedLayoutAttrs;
+      if (failed(resolveLayoutAttr(queries, cachedLayoutAttrs))) {
+        LDBG() << "failed to resolve layouts for an query";
+        assert(false);
+        return;
+      }
+      SetVector<Attribute> resolvers;
+      for (auto layoutAttrs : cachedLayoutAttrs.values()) {
+        resolvers.insert(layoutAttrs.begin(), layoutAttrs.end());
+      }
+      LLVM_DEBUG({
+        if (resolvers.size() == 1) {
+          llvm::dbgs() << "Unique candidate:\n";
+        } else {
+          llvm::dbgs() << "Multiple candidates:\n";
+        }
+        for (auto i : resolvers) {
+          llvm::dbgs() << i << "\n";
+        }
+      });
+
+      // Now we get resolvers.
+      if (resolvers.size() != 1) {
+        LDBG() << "multiple resolvers are not supported, need a heuristic";
+        return;
       }
     }
   }
