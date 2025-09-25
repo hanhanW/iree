@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <queue>
+
 #include "iree/compiler/Dialect/Encoding/IR/EncodingDialect.h"
 #include "iree/compiler/Dialect/Encoding/IR/EncodingTypes.h"
 #include "iree/compiler/Dialect/Stream/Analysis/Affinity.h"
@@ -22,6 +24,8 @@
 #include "llvm/Support/DebugLog.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/WalkResult.h"
@@ -752,6 +756,9 @@ public:
 
   std::optional<ParameterWrapper> getSourceGlobal(ParameterWrapper op);
 
+  bool updateEncoding(RewriterBase &rewriter, ParameterWrapper param,
+                      Attribute newEncoding);
+
   SmallVector<IREE::Stream::TensorDispatchOp>
   lookupDispatchUsers(ParameterWrapper op);
 
@@ -888,7 +895,7 @@ EncodingAnalysis::getSourceGlobal(ParameterWrapper op) {
       LLVM_DEBUG(llvm::dbgs() << "Skip self as source" << "\n");
       continue;
     }
-    if (!encodings.empty()) {
+    if (encodings.empty()) {
       continue;
     }
     LLVM_DEBUG({ llvm::dbgs() << "Candidate:" << sourceOp << "\n"; });
@@ -904,6 +911,50 @@ EncodingAnalysis::getSourceGlobal(ParameterWrapper op) {
 SmallVector<IREE::Stream::TensorDispatchOp>
 EncodingAnalysis::lookupDispatchUsers(ParameterWrapper op) {
   return tensorDispatchUsersFromGlobal[op];
+}
+
+bool EncodingAnalysis::updateEncoding(RewriterBase &rewriter,
+                                      ParameterWrapper param,
+                                      Attribute newEncoding) {
+  std::queue<Operation *> worklist;
+  for (auto [consumerOp, encodingChain] : lookupGlobalConsumerLayouts(param)) {
+    assert(consumerOp.op && "expects a global op, not parameter string");
+    const Explorer::GlobalInfo *globalInfo =
+        explorer.getGlobalInfo(consumerOp.op);
+    for (IREE::Util::GlobalStoreOpInterface storeOp : globalInfo->getStores()) {
+      worklist.push(storeOp);
+    }
+    while (!worklist.empty()) {
+      Operation *op = worklist.front();
+      worklist.pop();
+      bool result =
+          TypeSwitch<Operation *, bool>(op)
+              .Case<IREE::Util::GlobalStoreOpInterface>([&](auto storeOp) {
+                worklist.push(storeOp.getStoredGlobalValue().getDefiningOp());
+                return true;
+              })
+              .Case<IREE::Stream::TensorEncodeOp>([&](auto encodeOp) {
+                auto resultType =
+                    dyn_cast<RankedTensorType>(encodeOp.getResultEncoding());
+                if (!resultType) {
+                  return false;
+                }
+                resultType = resultType.cloneWithEncoding(newEncoding);
+                encodeOp.setResultEncoding(resultType);
+                return true;
+              })
+              .Case<IREE::Stream::AsyncTransferOp>([&](auto transferOp) {
+                worklist.push(transferOp.getSource().getDefiningOp());
+                return true;
+              })
+              .Default([](Operation *) { return false; });
+      if (!result) {
+        LDBG() << "failed to update " << *op;
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 namespace {
@@ -984,6 +1035,7 @@ struct UnifyEncodingForGlobalsPass
     //   to duplicate the dispatches based on needs? I think the answer is
     //   yes, it can happen before encoding specialization, because it does
     //   not break the assumptions. Note: we can do it != it is the solution.
+    IRRewriter rewriter(&getContext());
     for (auto globalOp : analysis.getGlobalOps()) {
       LDBG() << "resolving " << globalOp;
       std::optional<ParameterWrapper> sourceGlobal =
@@ -994,10 +1046,16 @@ struct UnifyEncodingForGlobalsPass
       }
       SmallVector<IREE::Stream::TensorDispatchOp> users;
       SmallVector<ParameterWrapper> consumers;
-      for (auto [consumerOp, encoding] :
+      SetVector<Attribute> encodings;
+      for (auto [consumerOp, consumerEncodings] :
            analysis.lookupGlobalConsumerLayouts(globalOp)) {
         users.append(analysis.lookupDispatchUsers(consumerOp));
-        (void)encoding;
+        consumers.push_back(consumerOp);
+        encodings.insert(consumerEncodings.begin(), consumerEncodings.end());
+      }
+      if (encodings.size() <= 1) {
+        LDBG() << "skip, because it has a single layout";
+        continue;
       }
 
       SmallVector<IREE::Stream::AffinityAndOpPair> queries;
@@ -1012,13 +1070,6 @@ struct UnifyEncodingForGlobalsPass
             continue;
           }
           Value operand = dispatchOp.getMixedOperands()[idx];
-          auto type =
-              cast<TypeAttr>(dispatchOp.getOperandEncodings().getValue()[idx])
-                  .getValue();
-          // Skip if the operand type is not AffinityType.
-          if (!isa<IREE::Stream::AffinityTypeInterface>(type)) {
-            continue;
-          }
           SmallVector<IREE::Stream::AffinityAttr> affinityAttrs;
           if (!affinityAnalysis.tryLookupResourceAffinity(operand,
                                                           affinityAttrs)) {
@@ -1059,6 +1110,41 @@ struct UnifyEncodingForGlobalsPass
         LDBG() << "multiple resolvers are not supported, need a heuristic";
         return;
       }
+      // TODO: Query from the resolver to decide the encoding.
+      Attribute unifiedEncoding = encodings[0];
+#if 0
+      // Use identity for debugging.
+      unifiedEncoding = IREE::Encoding::IdentityAttr::get(&getContext());
+#endif
+      LDBG() << "Selected encoding: " << unifiedEncoding;
+
+      for (IREE::Stream::TensorDispatchOp dispatchOp : users) {
+        LDBG() << "Updating " << dispatchOp;
+        SmallVector<Type> newOperandEncodings =
+            llvm::map_to_vector(dispatchOp.getOperandEncodings().getValue(),
+                                [](Attribute typeAttr) -> Type {
+                                  return cast<TypeAttr>(typeAttr).getValue();
+                                });
+        for (auto [param, idx] : analysis.lookupGlobalInputs(dispatchOp)) {
+          std::optional<ParameterWrapper> paramSourceGlobal =
+              analysis.getSourceGlobal(param);
+          if (!paramSourceGlobal ||
+              !(paramSourceGlobal.value() == sourceGlobal.value())) {
+            continue;
+          }
+          newOperandEncodings[idx] =
+              cast<RankedTensorType>(newOperandEncodings[idx])
+                  .cloneWithEncoding(unifiedEncoding);
+          LDBG() << "Updating new encoding for " << idx << "-th operand";
+        }
+        dispatchOp.setOperandEncodingsAttr(
+            rewriter.getTypeArrayAttr(newOperandEncodings));
+      }
+
+      analysis.updateEncoding(rewriter, globalOp, unifiedEncoding);
+
+      // TODO: Update executables. Currently it is not needed in the prototype,
+      // because SpecializeEncoding pass handles the case.
     }
   }
 };
