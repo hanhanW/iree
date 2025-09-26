@@ -1141,7 +1141,9 @@ struct UnifyEncodingForGlobalsPass
             rewriter.getTypeArrayAttr(newOperandEncodings));
       }
 
-      analysis.updateEncoding(rewriter, globalOp, unifiedEncoding);
+      bool result =
+          analysis.updateEncoding(rewriter, globalOp, unifiedEncoding);
+      assert(result && "failed to update encoding ops");
 
       // TODO: Update executables. Currently it is not needed in the prototype,
       // because SpecializeEncoding pass handles the case.

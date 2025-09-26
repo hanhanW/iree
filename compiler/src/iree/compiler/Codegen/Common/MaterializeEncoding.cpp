@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "iree/compiler/Codegen/Common/EncodingUtils.h"
+#include "iree/compiler/Codegen/Common/GPU/GPUVectorDistribution.h"
 #include "iree/compiler/Codegen/Common/Transforms.h"
 #include "iree/compiler/Codegen/Dialect/CPU/IR/IREECPUDialect.h"
 #include "iree/compiler/Codegen/Dialect/Codegen/IR/IREECodegenDialect.h"
@@ -16,11 +17,13 @@
 #include "iree/compiler/Dialect/HAL/IR/HALTypes.h"
 #include "iree/compiler/Dialect/Stream/Analysis/Affinity.h"
 #include "llvm/Support/DebugLog.h"
+#include "llvm/Support/LogicalResult.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Linalg/Transforms/Transforms.h"
 #include "mlir/Dialect/MemRef/Transforms/Transforms.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/Interfaces/FunctionInterfaces.h"
 #include "mlir/Interfaces/TilingInterface.h"
 #include "mlir/Pass/PassManager.h"
@@ -59,13 +62,71 @@ updateFuncSignature(FunctionOpInterface funcOp,
   }
 }
 
+/// Pattern to convert `iree_tensor_ext.dispatch.tensor.load` operation when
+/// materializing the encoding.
+struct DecomposeMismatchEncodingTensorLoadOp
+    : public OpRewritePattern<IREE::TensorExt::DispatchTensorLoadOp> {
+  using OpRewritePattern<
+      IREE::TensorExt::DispatchTensorLoadOp>::OpRewritePattern;
+
+  DecomposeMismatchEncodingTensorLoadOp(
+      MaterializeEncodingTypeConverter &converter, MLIRContext *ctx)
+      : OpRewritePattern<IREE::TensorExt::DispatchTensorLoadOp>(ctx),
+        typeConverter(converter) {}
+
+  LogicalResult matchAndRewrite(IREE::TensorExt::DispatchTensorLoadOp loadOp,
+                                PatternRewriter &rewriter) const override {
+    if (!loadOp.isLoadOfWholeSource()) {
+      return rewriter.notifyMatchFailure(loadOp, "unhandled partial loads");
+    }
+
+    IREE::TensorExt::DispatchTensorType sourceType = loadOp.getSourceType();
+    RankedTensorType destType = loadOp.getResult().getType();
+    auto boundTensorType =
+        dyn_cast<RankedTensorType>(sourceType.getBoundType());
+    if (!boundTensorType) {
+      return failure();
+    }
+    if (boundTensorType == destType) {
+      return failure();
+    }
+    if (!boundTensorType.getEncoding() && !destType.getEncoding()) {
+      return failure();
+    }
+#if 1
+    if (typeConverter.convertType(boundTensorType) ==
+        typeConverter.convertType(destType)) {
+      return rewriter.notifyMatchFailure(
+          loadOp, "the source type and the result type match");
+    }
+#endif
+    Location loc = loadOp.getLoc();
+    Value result = IREE::TensorExt::DispatchTensorLoadOp::create(
+        rewriter, loc, boundTensorType, loadOp.getSource(),
+        loadOp.getSourceDims(), loadOp.getMixedOffsets(),
+        loadOp.getMixedSizes(), loadOp.getMixedStrides());
+    if (Attribute encoding = destType.getEncoding()) {
+      if (encoding != boundTensorType.getEncoding()) {
+        result = IREE::Encoding::UnsetEncodingOp::create(
+            rewriter, loc, boundTensorType.dropEncoding(), result);
+      }
+      result = IREE::Encoding::SetEncodingOp::create(rewriter, loc, destType,
+                                                     result);
+    }
+    rewriter.replaceOp(loadOp, result);
+    return success();
+  }
+
+private:
+  MaterializeEncodingTypeConverter &typeConverter;
+};
+
 static LogicalResult
 materializeFuncOpEncodings(FunctionOpInterface funcOp,
                            IREE::HAL::ExecutableTargetAttr targetAttr,
                            bool testCLGPUTarget = false) {
   MLIRContext *ctx = funcOp.getContext();
   {
-    RewritePatternSet patterns(ctx);
     DictionaryAttr targetConfig =
         targetAttr ? targetAttr.getConfiguration() : nullptr;
     // Check if the encoding resolver is a GPUPaddingResolverAttr. For padding
@@ -129,6 +190,18 @@ materializeFuncOpEncodings(FunctionOpInterface funcOp,
 
     MaterializeEncodingTypeConverter typeConverter(layoutAttrWithTargetInfo);
     MaterializeEncodingConversionTarget target(*ctx);
+
+    {
+      RewritePatternSet patterns(ctx);
+      patterns.insert<DecomposeMismatchEncodingTensorLoadOp>(typeConverter,
+                                                             ctx);
+      if (failed(applyPatternsGreedily(funcOp, std::move(patterns)))) {
+        return funcOp.emitOpError("materialization failed");
+      }
+    }
+    //return success();
+
+    RewritePatternSet patterns(ctx);
     populateMaterializeEncodingPatterns(patterns, target, typeConverter);
 
     // Replace any unrealized conversions to tensor.cast ops if they come from
