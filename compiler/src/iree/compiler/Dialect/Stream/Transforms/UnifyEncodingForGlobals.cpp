@@ -47,6 +47,7 @@ namespace {
 // sense to use the last encoding instead, since encoding is a hint. You don't
 // expect to relayout a tensor several times in the encode ops chain.
 struct ParameterWrapper {
+  ParameterWrapper() = default;
   explicit ParameterWrapper(Operation *rootOp) {
     if (auto global =
             dyn_cast_if_present<IREE::Util::GlobalOpInterface>(rootOp)) {
@@ -762,6 +763,8 @@ public:
   SmallVector<IREE::Stream::TensorDispatchOp>
   lookupDispatchUsers(ParameterWrapper op);
 
+  bool isDefinedWithEncodings(IREE::Util::GlobalOpInterface globalOp);
+
 private:
   Explorer explorer;
   llvm::BumpPtrAllocator allocator;
@@ -771,6 +774,7 @@ private:
       globalConsumerLayouts;
   DenseMap<ParameterWrapper, SmallVector<IREE::Stream::TensorDispatchOp>>
       tensorDispatchUsersFromGlobal;
+  DenseMap<IREE::Util::GlobalOpInterface, ParameterWrapper> sourceGlobalCache;
 };
 }; // namespace
 
@@ -836,6 +840,13 @@ LogicalResult EncodingAnalysis::run() {
         });
         llvm::dbgs() << ")\n";
       });
+      if (!sourceOp.op && !sourceOp.parameter.empty()) {
+        sourceGlobalCache[globalOp] = sourceOp;
+        continue;
+      }
+      if (sourceOp.op && !sourceGlobalCache.count(globalOp)) {
+        sourceGlobalCache[globalOp] = sourceOp;
+      }
     }
   }
 
@@ -885,7 +896,11 @@ EncodingAnalysis::getSourceGlobal(ParameterWrapper op) {
     // Parameter is always the source.
     return op;
   }
-  std::optional<ParameterWrapper> result;
+  if (!sourceGlobalCache.count(op.op)) {
+    return std::nullopt;
+  }
+  return sourceGlobalCache.lookup(op.op);
+  SmallVector<ParameterWrapper> result;
   auto globalPVS =
       solver.lookupElementFor<GlobalPVS>(Position::forOperation(op.op));
   LLVM_DEBUG(llvm::dbgs() << "Looking up source global for:"
@@ -899,13 +914,42 @@ EncodingAnalysis::getSourceGlobal(ParameterWrapper op) {
       continue;
     }
     LLVM_DEBUG({ llvm::dbgs() << "Candidate:" << sourceOp << "\n"; });
-    if (result) {
-      assert(false && "expect to be initialized once");
-      return std::nullopt;
-    }
-    result = sourceOp;
+    // if (result) {
+    //   assert(false && "expect to be initialized once");
+    //   return std::nullopt;
+    // }
+    result.push_back(sourceOp);
   }
-  return result;
+  for (auto sourceOp : result) {
+    if (!sourceOp.op && !sourceOp.parameter.empty()) {
+      return sourceOp;
+    }
+  }
+  for (auto sourceOp : result) {
+    if (sourceOp.op) {
+      return sourceOp;
+    }
+  }
+  return std::nullopt;
+}
+
+bool EncodingAnalysis::isDefinedWithEncodings(
+    IREE::Util::GlobalOpInterface globalOp) {
+  if (!globalOp) {
+    return false;
+  }
+  std::optional<ParameterWrapper> sourceGlobal =
+      getSourceGlobal(ParameterWrapper(globalOp));
+  assert(sourceGlobal && !sourceGlobal->op);
+  for (auto [consumerOp, encodings] :
+       lookupGlobalConsumerLayouts(*sourceGlobal)) {
+    if (consumerOp.op != globalOp) {
+      continue;
+    }
+    return !encodings.empty();
+  }
+  assert(false && "can't find the SSA chain");
+  return true;
 }
 
 SmallVector<IREE::Stream::TensorDispatchOp>
@@ -916,9 +960,15 @@ EncodingAnalysis::lookupDispatchUsers(ParameterWrapper op) {
 bool EncodingAnalysis::updateEncoding(RewriterBase &rewriter,
                                       ParameterWrapper param,
                                       Attribute newEncoding) {
+  OpBuilder::InsertionGuard guard(rewriter);
   std::queue<Operation *> worklist;
   for (auto [consumerOp, encodingChain] : lookupGlobalConsumerLayouts(param)) {
     assert(consumerOp.op && "expects a global op, not parameter string");
+    if (!isDefinedWithEncodings(consumerOp.op)) {
+      LDBG() << "skipping updating " << *consumerOp.op.getOperation()
+             << " because it is not defined with encodings";
+      continue;
+    }
     const Explorer::GlobalInfo *globalInfo =
         explorer.getGlobalInfo(consumerOp.op);
     for (IREE::Util::GlobalStoreOpInterface storeOp : globalInfo->getStores()) {
@@ -941,10 +991,25 @@ bool EncodingAnalysis::updateEncoding(RewriterBase &rewriter,
                 }
                 resultType = resultType.cloneWithEncoding(newEncoding);
                 encodeOp.setResultEncoding(resultType);
+                rewriter.setInsertionPoint(encodeOp);
+                auto tensorSizeOfOp = IREE::Stream::TensorSizeOfOp::create(
+                    rewriter, encodeOp.getLoc(), TypeAttr::get(resultType),
+                    /*result_encoding_dims=*/ValueRange{},
+                    encodeOp.getAffinityAttr());
+                encodeOp.getResultSizeMutable().assign(
+                    tensorSizeOfOp.getResult());
                 return true;
               })
               .Case<IREE::Stream::AsyncTransferOp>([&](auto transferOp) {
                 worklist.push(transferOp.getSource().getDefiningOp());
+                return true;
+              })
+              .Case<IREE::Stream::TensorConstantOp>([&](auto constOp) {
+                if (!param.op) {
+                  auto attr = dyn_cast<IREE::Stream::NamedParameterAttr>(
+                      constOp.getValue());
+                  assert(param.parameter == attr.getKey());
+                }
                 return true;
               })
               .Default([](Operation *) { return false; });
@@ -980,17 +1045,17 @@ struct UnifyEncodingForGlobalsPass
         }
         llvm::dbgs() << "\n";
       });
-      for (auto [consumerOp, encodings] :
-           analysis.lookupGlobalConsumerLayouts(globalOp)) {
-        LLVM_DEBUG({
+      LLVM_DEBUG({
+        for (auto [consumerOp, encodings] :
+             analysis.lookupGlobalConsumerLayouts(globalOp)) {
           llvm::dbgs() << "\thas consumer: " << consumerOp << "\n";
           llvm::dbgs() << "\twhere the encoding is (";
           llvm::interleaveComma(encodings, llvm::dbgs(), [&](Attribute value) {
             value.print(llvm::dbgs());
           });
           llvm::dbgs() << ")\n";
-        });
-      }
+        }
+      });
     }
 
     IREE::Stream::AffinityAnalysis affinityAnalysis(moduleOp);
@@ -1036,11 +1101,11 @@ struct UnifyEncodingForGlobalsPass
     //   yes, it can happen before encoding specialization, because it does
     //   not break the assumptions. Note: we can do it != it is the solution.
     IRRewriter rewriter(&getContext());
-    for (auto globalOp : analysis.getGlobalOps()) {
+    for (ParameterWrapper globalOp : analysis.getGlobalOps()) {
       LDBG() << "resolving " << globalOp;
       std::optional<ParameterWrapper> sourceGlobal =
           analysis.getSourceGlobal(globalOp);
-      if (!sourceGlobal) {
+      if (!sourceGlobal || sourceGlobal->op) {
         LDBG() << "skip, because it is not a source global";
         continue;
       }
@@ -1049,6 +1114,10 @@ struct UnifyEncodingForGlobalsPass
       SetVector<Attribute> encodings;
       for (auto [consumerOp, consumerEncodings] :
            analysis.lookupGlobalConsumerLayouts(globalOp)) {
+        if (!analysis.isDefinedWithEncodings(consumerOp.op)) {
+          LDBG() << "skip, because it is not defined with encodings";
+          continue;
+        }
         users.append(analysis.lookupDispatchUsers(consumerOp));
         consumers.push_back(consumerOp);
         encodings.insert(consumerEncodings.begin(), consumerEncodings.end());
@@ -1062,13 +1131,18 @@ struct UnifyEncodingForGlobalsPass
       for (IREE::Stream::TensorDispatchOp dispatchOp : users) {
         LDBG() << "processing " << dispatchOp;
         for (auto [param, idx] : analysis.lookupGlobalInputs(dispatchOp)) {
-          queries.emplace_back(dispatchOp.getAffinityAttr(), dispatchOp);
           std::optional<ParameterWrapper> paramSourceGlobal =
               analysis.getSourceGlobal(param);
           if (!paramSourceGlobal ||
               !(paramSourceGlobal.value() == sourceGlobal.value())) {
             continue;
           }
+          if (!analysis.isDefinedWithEncodings(param.op)) {
+            LDBG() << "skip, because it is not defined with encodings";
+            continue;
+          }
+          queries.emplace_back(dispatchOp.getAffinityAttr(), dispatchOp);
+
           Value operand = dispatchOp.getMixedOperands()[idx];
           SmallVector<IREE::Stream::AffinityAttr> affinityAttrs;
           if (!affinityAnalysis.tryLookupResourceAffinity(operand,
@@ -1130,6 +1204,10 @@ struct UnifyEncodingForGlobalsPass
               analysis.getSourceGlobal(param);
           if (!paramSourceGlobal ||
               !(paramSourceGlobal.value() == sourceGlobal.value())) {
+            continue;
+          }
+          if (!analysis.isDefinedWithEncodings(param.op)) {
+            LDBG() << "skip, because it is not defined with encodings";
             continue;
           }
           newOperandEncodings[idx] =
