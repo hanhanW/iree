@@ -28,6 +28,10 @@ static llvm::cl::opt<bool> clReplicateGlobalsPerAffinity(
         "Replicates globals for each unique affinity they are used with."),
     llvm::cl::init(false));
 
+static llvm::cl::opt<bool> clUnifyEncodingForGlobals(
+    "iree-stream-experimental-unify-encoding-for-globals",
+    llvm::cl::desc("TBD."), llvm::cl::init(true));
+
 namespace mlir::iree_compiler::IREE::Stream {
 
 using FunctionLikeNest =
@@ -150,7 +154,9 @@ void buildStreamTensorPassPipeline(OpPassManager &passManager,
     buildStreamCleanupPassPipeline(ipoPipeline, transformOptions);
     passManager.addPass(
         IREE::Util::createFixedPointIteratorPass(std::move(ipoPipeline)));
-    passManager.addPass(IREE::Stream::createUnifyEncodingForGlobalsPass());
+    if (clUnifyEncodingForGlobals) {
+      passManager.addPass(IREE::Stream::createUnifyEncodingForGlobalsPass());
+    }
   }
 
   //----------------------------------------------------------------------------
