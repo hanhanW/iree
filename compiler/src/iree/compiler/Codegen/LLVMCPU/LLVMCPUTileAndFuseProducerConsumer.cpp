@@ -59,12 +59,23 @@ static Operation *getRootOp(ArrayRef<Operation *> computeOps,
 /// Returns the last operation that has `level` tiling level in lowering config.
 /// Returns nullptr if the operation does not exist.
 static Operation *getLastAnchorOp(ArrayRef<Operation *> computeOps,
-                                  IREE::CPU::TilingLevel level) {
+                                  IREE::CPU::TilingLevel level,
+                                  bool startBeforeRootOp) {
+  bool meet = true;
+  if (startBeforeRootOp) {
+    meet = false;
+  }
   for (Operation *op : llvm::reverse(computeOps)) {
     IREE::Codegen::LoweringConfigAttrInterface loweringConfig =
         getLoweringConfig(op);
-    if (loweringConfig && loweringConfig.hasTilingLevel(level)) {
+    if (meet && loweringConfig && loweringConfig.hasTilingLevel(level)) {
       return op;
+    }
+    if (loweringConfig && loweringConfig.hasWorkgroupTilingLevel()) {
+      meet = true;
+    }
+    if (isa<IREE::Codegen::UKernelGenericOp>(op)) {
+      meet = true;
     }
   }
   return nullptr;
@@ -232,37 +243,41 @@ void LLVMCPUTileAndFuseProducerConsumer::runOnOperation() {
   IRRewriter rewriter(funcOp);
 
   SmallVector<Operation *> computeOps = getComputeOps(funcOp);
-  Operation *anchorOp;
+  SmallVector<Operation *> anchorOps;
   if (anchorOnRootOp) {
-    anchorOp = getRootOp(computeOps, tilingLevel);
+    Operation *anchorOp = getRootOp(computeOps, tilingLevel);
+    if (anchorOp) {
+      anchorOps.push_back(anchorOp);
+    }
+
   } else {
-    // TODO(hanchung): Support the case that anchor op is root op's producer. It
-    // is not common that the producer op has additional iteration dimensions,
-    // but it should be handled like consumers. I.e., the additional dimensions
-    // should be tiled. It is easier to support after we have solid lowering
-    // config propagation.
-    Operation *rootOp =
-        getRootOp(computeOps, IREE::CPU::TilingLevel::DistributionTiles);
-    anchorOp = getLastAnchorOp(computeOps, tilingLevel);
-    if (rootOp &&
-        llvm::find(computeOps, rootOp) > llvm::find(computeOps, anchorOp)) {
-      LDBG() << "anchor op that is rootOp's producer is not supported";
-      return;
+    Operation *anchorOp =
+        getLastAnchorOp(computeOps, tilingLevel, /*startBeforeRootOp=*/false);
+    if (anchorOp) {
+      anchorOps.push_back(anchorOp);
+    }
+    anchorOp =
+        getLastAnchorOp(computeOps, tilingLevel, /*startBeforeRootOp=*/true);
+    if (anchorOp) {
+      anchorOps.push_back(anchorOp);
     }
   }
-  if (!anchorOp) {
+  if (anchorOps.empty()) {
     LDBG() << "unable to find an anchor operation that has "
            << IREE::CPU::getTilingLevelName(tilingLevel) << " config";
     return;
   }
 
-  if (failed(tileRootAndFuseProducerConsumer(
-          rewriter, cast<TilingInterface>(anchorOp), tilingLevel,
-          onlyFuseProducerInputOperands))) {
-    funcOp.emitError() << "tiling of level "
-                       << IREE::CPU::getTilingLevelName(tilingLevel)
-                       << " failed\n";
-    return signalPassFailure();
+  for (auto anchorOp : anchorOps) {
+    LDBG() << "anchorOp: " << *anchorOp;
+    if (failed(tileRootAndFuseProducerConsumer(
+            rewriter, cast<TilingInterface>(anchorOp), tilingLevel,
+            onlyFuseProducerInputOperands))) {
+      funcOp.emitError() << "tiling of level "
+                         << IREE::CPU::getTilingLevelName(tilingLevel)
+                         << " failed\n";
+      return signalPassFailure();
+    }
   }
 
   RewritePatternSet patterns =

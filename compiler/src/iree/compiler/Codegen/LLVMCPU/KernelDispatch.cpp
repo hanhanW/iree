@@ -2950,6 +2950,8 @@ static void scaleAndPermutateTilingForPackOp(linalg::PackOp packOp,
     if (ShapedType::isDynamic(size)) {
       continue;
     }
+    LDBG() << "Scaling tile size at pos " << pos << ", where the value is "
+           << tileSizes[pos] << ", by " << size;
     tileSizes[pos] /= size;
   }
   // Then apply dimension permutation if present.
@@ -3233,6 +3235,9 @@ void MultiLoweringConfigGenerator::adjustTileSizesForRootOp() {
   // Adjust root op tiling sizes with non-root op.
   for (auto &[op, vecTileSize] : nonRootOpVecTileSizes) {
     if (isa<linalg::PackOp>(op)) {
+      if (llvm::find(computeOps, op) < llvm::find(computeOps, rootOperation)) {
+        continue;
+      }
       // For pack op, align the distribution tile size and overwrite the
       // vector parallel tile size.
       adjust(op, vecTileSize, TilingLevel::DistributionTiles, align);
