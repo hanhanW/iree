@@ -689,6 +689,15 @@ struct CPUEncodingPackedLayoutMaterializerAttr
     if (enumeratedTileMxNxK.empty()) {
       return info;
     }
+    // XXX: Hack to produce different RHS config for [?, 4096, 4096] and [4,
+    // 4096, 4096]. Mainly for testing on CPU.
+    LDBG() << "Encoding: " << encoding;
+    if (llvm::all_of(encoding.getIterationSizesArray(), ShapedType::isStatic)) {
+      enumeratedTileMxNxK.erase(enumeratedTileMxNxK.begin());
+      for (auto &tile : enumeratedTileMxNxK) {
+        std::swap(tile.M, tile.N);
+      }
+    }
     auto narrowDim = IREE::Encoding::getPo2MatmulNarrowDim(encoding);
     // Choose a final matmul TileMxNxK from the above-enumarated tile shapes,
     // taking narrow dimensions into account.
