@@ -87,6 +87,18 @@ static RankedTensorType getPermutedTensorType(RankedTensorType type,
   return RankedTensorType::get(permutedShape, type.getElementType());
 }
 
+static bool isReshapeBlockingFusion(Operation *producer, Operation *consumer) {
+  auto isFusableOp = [](Operation *op) {
+    if (!op) {
+      return false;
+    }
+    return isa_and_nonnull<linalg::LinalgDialect,
+                           IREE::LinalgExt::IREELinalgExtDialect,
+                           tensor::TensorDialect>(op->getDialect());
+  };
+  return isFusableOp(producer) && isFusableOp(consumer);
+}
+
 //===----------------------------------------------------------------------===//
 // Transpose specialization
 //===----------------------------------------------------------------------===//
@@ -324,6 +336,12 @@ public:
           transposeOp, "transpose input is not a single-use collapse shape");
     }
 
+    if (!isReshapeBlockingFusion(transposeOp,
+                                 collapseOp.getSrc().getDefiningOp())) {
+      return rewriter.notifyMatchFailure(transposeOp,
+                                         "transpose not blocking fusion");
+    }
+
     SmallVector<ReassociationIndices> reassociations =
         collapseOp.getReassociationIndices();
 
@@ -519,6 +537,13 @@ public:
     if (!transposeOp || !transposeOp->hasOneUse()) {
       return rewriter.notifyMatchFailure(
           expandOp, "expand shape input is not a single-use transpose");
+    }
+
+    if (llvm::none_of(expandOp->getUsers(), [&](Operation *consumer) {
+          return isReshapeBlockingFusion(transposeOp, consumer);
+        })) {
+      return rewriter.notifyMatchFailure(transposeOp,
+                                         "transpose not blocking fusion");
     }
 
     auto invPerm = invertPermutationVector(transposeOp.getPermutation());
@@ -736,6 +761,10 @@ public:
       return rewriter.notifyMatchFailure(genericOp, "non-elementwise generic");
     }
 
+    if (genericOp.hasIndexSemantics()) {
+      return rewriter.notifyMatchFailure(genericOp, "has index semantics");
+    }
+
     if (genericOp.getNumDpsInits() != 1) {
       return rewriter.notifyMatchFailure(genericOp,
                                          "unimplemented: multiple results");
@@ -840,6 +869,10 @@ public:
       return rewriter.notifyMatchFailure(transposeOp, "not elementwise");
     }
 
+    if (genericOp.hasIndexSemantics()) {
+      return rewriter.notifyMatchFailure(genericOp, "has index semantics");
+    }
+
     if (!genericOp->hasOneUse()) {
       return rewriter.notifyMatchFailure(transposeOp, "not single user");
     }
@@ -873,9 +906,9 @@ public:
     SmallVector<AffineMap> indexingMaps = getTransposedIndexingMaps(
         genericOp, inputOperand->getOperandNumber(), transposeMap);
 
-    // We do not need to update indexing maps because this is a unary
-    // elementwise op where the input and output maps are the same. Just
-    // replace the operands with transposed variants.
+    // We do not need to update indexing maps because this is an elementwise
+    // op where the input and output maps are the same.
+    // Just replace the operands with transposed variants.
     auto newGenericOp =
         mlir::clone(rewriter, genericOp, newInit.getType(), newOperands);
     newGenericOp.setIndexingMapsAttr(
@@ -1084,6 +1117,13 @@ void PropagateLinalgTransposePass::runOnOperation() {
           if (!isa<tensor::ExpandShapeOp>(consumer)) {
             return false;
           }
+
+          if (llvm::none_of(
+                  consumer->getUsers(), [&](Operation *expandConsumer) {
+                    return isReshapeBlockingFusion(producer, expandConsumer);
+                  })) {
+            return false;
+          }
           // Only propagate if the immediate consumer of the reshape is a
           // transpose.
           return consumer->hasOneUse() &&
@@ -1156,6 +1196,12 @@ void PropagateLinalgTransposePass::runOnOperation() {
           if (!isa<tensor::CollapseShapeOp>(producer)) {
             return false;
           }
+
+          if (!isReshapeBlockingFusion(producer->getOperand(0).getDefiningOp(),
+                                       consumer)) {
+            return false;
+          }
+
           // Require that the immediate producer of the reshape is a transpose.
           return isa_and_nonnull<linalg::TransposeOp>(
               producer->getOperand(0).getDefiningOp());

@@ -761,10 +761,10 @@ hal.executable public @main {
       func.func @multi_mma_data_tiled_unrolled_MFMA_F32_16x16x4_F32()
         attributes {translation_info = #translation_info} {
         %c0 = arith.constant 0 : index
-        %0 = hal.interface.binding.subspan layout(#pipeline_layout) binding(0) alignment(64) offset(%c0) flags("ReadOnly|Indirect") : !iree_tensor_ext.dispatch.tensor<readonly:tensor<4x1x8x4x4x4x4xf32>>
+        %0 = hal.interface.binding.subspan layout(#pipeline_layout) binding(0) alignment(64) offset(%c0) flags("ReadOnly|Indirect") : !iree_tensor_ext.dispatch.tensor<readonly:tensor<4x1x8x4x16x4xf32>>
         %1 = hal.interface.binding.subspan layout(#pipeline_layout) binding(1) alignment(64) offset(%c0) flags("ReadOnly|Indirect") : !iree_tensor_ext.dispatch.tensor<readonly:tensor<4x1x4x2x4x16x4xf32>>
         %2 = hal.interface.binding.subspan layout(#pipeline_layout) binding(2) alignment(64) offset(%c0) flags(Indirect) : !iree_tensor_ext.dispatch.tensor<readwrite:tensor<4x4x4x8x2x4x16x4xf32>>
-        %3 = iree_tensor_ext.dispatch.tensor.load %0, offsets = [0, 0, 0, 0, 0, 0, 0], sizes = [4, 1, 8, 4, 4, 4, 4], strides = [1, 1, 1, 1, 1, 1, 1] : !iree_tensor_ext.dispatch.tensor<readonly:tensor<4x1x8x4x4x4x4xf32>> -> tensor<4x1x8x4x4x4x4xf32>
+        %3 = iree_tensor_ext.dispatch.tensor.load %0, offsets = [0, 0, 0, 0, 0, 0], sizes = [4, 1, 8, 4, 16, 4], strides = [1, 1, 1, 1, 1, 1] : !iree_tensor_ext.dispatch.tensor<readonly:tensor<4x1x8x4x16x4xf32>> -> tensor<4x1x8x4x16x4xf32>
         %4 = iree_tensor_ext.dispatch.tensor.load %1, offsets = [0, 0, 0, 0, 0, 0, 0], sizes = [4, 1, 4, 2, 4, 16, 4], strides = [1, 1, 1, 1, 1, 1, 1] : !iree_tensor_ext.dispatch.tensor<readonly:tensor<4x1x4x2x4x16x4xf32>> -> tensor<4x1x4x2x4x16x4xf32>
         %5 = iree_tensor_ext.dispatch.tensor.load %2, offsets = [0, 0, 0, 0, 0, 0, 0, 0], sizes = [4, 4, 4, 8, 2, 4, 16, 4], strides = [1, 1, 1, 1, 1, 1, 1, 1] : !iree_tensor_ext.dispatch.tensor<readwrite:tensor<4x4x4x8x2x4x16x4xf32>> -> tensor<4x4x4x8x2x4x16x4xf32>
         %6 = iree_codegen.inner_tiled ins(%3, %4) outs(%5) {
@@ -783,7 +783,7 @@ hal.executable public @main {
             intrinsics_n = 2,
             subgroups_n = 4,
             intrinsics_k = 4>}
-          : tensor<4x1x8x4x4x4x4xf32>, tensor<4x1x4x2x4x16x4xf32> into tensor<4x4x4x8x2x4x16x4xf32>
+          : tensor<4x1x8x4x16x4xf32>, tensor<4x1x4x2x4x16x4xf32> into tensor<4x4x4x8x2x4x16x4xf32>
         iree_tensor_ext.dispatch.tensor.store %6, %2, offsets = [0, 0, 0, 0, 0, 0, 0, 0], sizes = [4, 4, 4, 8, 2, 4, 16, 4], strides = [1, 1, 1, 1, 1, 1, 1, 1] : tensor<4x4x4x8x2x4x16x4xf32> -> !iree_tensor_ext.dispatch.tensor<readwrite:tensor<4x4x4x8x2x4x16x4xf32>>
         return
       }
@@ -801,7 +801,7 @@ hal.executable public @main {
 // CHECK-DAG:  %[[BINDING_C:.+]] = hal.interface.binding.subspan {{.*}} binding(2)
 // CHECK-DAG:  %[[ASSUMED_BINDING_C:.+]] = memref.assume_alignment %[[BINDING_C]]
 // CHECK-DAG:  %[[BUFFER_C:.+]] = amdgpu.fat_raw_buffer_cast %[[ASSUMED_BINDING_C]]
-// CHECK-DAG:  %[[A_ALLOC:.+]] = memref.alloc() : memref<1x1x8x4x4x4x4xf32, #gpu.address_space<workgroup>>
+// CHECK-DAG:  %[[A_ALLOC:.+]] = memref.alloc() : memref<1x1x8x4x16x4xf32, #gpu.address_space<workgroup>>
 // CHECK-DAG:  %[[B_ALLOC:.+]] = memref.alloc() : memref<1x1x4x2x4x16x4xf32, #gpu.address_space<workgroup>>
 // CHECK-DAG:  %[[C_INIT:.+]] = arith.constant dense<0.000000e+00> : vector<4xf32>
 // CHECK:      gpu.barrier
@@ -810,16 +810,16 @@ hal.executable public @main {
 // CHECK-DAG:  vector.transfer_write %[[A_GLOBAL_LOAD]], %[[A_ALLOC]]
 // CHECK-DAG:  vector.transfer_write %[[B_GLOBAL_LOAD]], %[[B_ALLOC]]
 // CHECK:      gpu.barrier
-// CHECK-DAG:  %[[A_READ:.+]] = vector.transfer_read %[[A_ALLOC]]{{.*}} vector<8x1x1x1x4xf32>
+// CHECK-DAG:  %[[A_READ:.+]] = vector.transfer_read %[[A_ALLOC]]{{.*}} vector<8x1x1x4xf32>
 // CHECK-DAG:  %[[B_READ:.+]] = vector.transfer_read %[[B_ALLOC]]{{.*}} vector<2x1x1x4xf32>
-// CHECK-DAG:  %[[A_EXTRACT00:.+]] = vector.extract %[[A_READ]][0, 0, 0, 0, 0] : f32 from vector<8x1x1x1x4xf32>
-// CHECK-DAG:  %[[A_EXTRACT01:.+]] = vector.extract %[[A_READ]][0, 0, 0, 0, 1] : f32 from vector<8x1x1x1x4xf32>
-// CHECK-DAG:  %[[A_EXTRACT02:.+]] = vector.extract %[[A_READ]][0, 0, 0, 0, 2] : f32 from vector<8x1x1x1x4xf32>
-// CHECK-DAG:  %[[A_EXTRACT03:.+]] = vector.extract %[[A_READ]][0, 0, 0, 0, 3] : f32 from vector<8x1x1x1x4xf32>
-// CHECK-DAG:  %[[A_EXTRACT70:.+]] = vector.extract %[[A_READ]][7, 0, 0, 0, 0] : f32 from vector<8x1x1x1x4xf32>
-// CHECK-DAG:  %[[A_EXTRACT71:.+]] = vector.extract %[[A_READ]][7, 0, 0, 0, 1] : f32 from vector<8x1x1x1x4xf32>
-// CHECK-DAG:  %[[A_EXTRACT72:.+]] = vector.extract %[[A_READ]][7, 0, 0, 0, 2] : f32 from vector<8x1x1x1x4xf32>
-// CHECK-DAG:  %[[A_EXTRACT73:.+]] = vector.extract %[[A_READ]][7, 0, 0, 0, 3] : f32 from vector<8x1x1x1x4xf32>
+// CHECK-DAG:  %[[A_EXTRACT00:.+]] = vector.extract %[[A_READ]][0, 0, 0, 0] : f32 from vector<8x1x1x4xf32>
+// CHECK-DAG:  %[[A_EXTRACT01:.+]] = vector.extract %[[A_READ]][0, 0, 0, 1] : f32 from vector<8x1x1x4xf32>
+// CHECK-DAG:  %[[A_EXTRACT02:.+]] = vector.extract %[[A_READ]][0, 0, 0, 2] : f32 from vector<8x1x1x4xf32>
+// CHECK-DAG:  %[[A_EXTRACT03:.+]] = vector.extract %[[A_READ]][0, 0, 0, 3] : f32 from vector<8x1x1x4xf32>
+// CHECK-DAG:  %[[A_EXTRACT70:.+]] = vector.extract %[[A_READ]][7, 0, 0, 0] : f32 from vector<8x1x1x4xf32>
+// CHECK-DAG:  %[[A_EXTRACT71:.+]] = vector.extract %[[A_READ]][7, 0, 0, 1] : f32 from vector<8x1x1x4xf32>
+// CHECK-DAG:  %[[A_EXTRACT72:.+]] = vector.extract %[[A_READ]][7, 0, 0, 2] : f32 from vector<8x1x1x4xf32>
+// CHECK-DAG:  %[[A_EXTRACT73:.+]] = vector.extract %[[A_READ]][7, 0, 0, 3] : f32 from vector<8x1x1x4xf32>
 // CHECK-DAG:  %[[B_EXTRACT00:.+]] = vector.extract %[[B_READ]][0, 0, 0, 0] : f32 from vector<2x1x1x4xf32>
 // CHECK-DAG:  %[[B_EXTRACT01:.+]] = vector.extract %[[B_READ]][0, 0, 0, 1] : f32 from vector<2x1x1x4xf32>
 // CHECK-DAG:  %[[B_EXTRACT02:.+]] = vector.extract %[[B_READ]][0, 0, 0, 2] : f32 from vector<2x1x1x4xf32>
@@ -1281,22 +1281,21 @@ hal.executable public @main {
   }
 }
 
-// CHECK-LABEL: func @unaligned_to_intrinsic_batched_matmul_nocpromo
-//   CHECK-NOT:   memref.alloc() {{.*}}xf32
-//   CHECK-DAG:   memref.alloc() : memref<1x4x66xf32, #gpu.address_space<workgroup>>
-//   CHECK-DAG:   memref.alloc() : memref<1x16x6xf32, #gpu.address_space<workgroup>>
-//   CHECK-DAG:   %[[B0:.+]] = hal.interface.binding.subspan layout({{.+}}) binding(0)
-//   CHECK-DAG:   %[[B1:.+]] = hal.interface.binding.subspan layout({{.+}}) binding(1)
-//   CHECK-DAG:   %[[B2:.+]] = hal.interface.binding.subspan layout({{.+}}) binding(2)
-//       CHECK:   scf.forall ({{.*}}) in (12, 37, 10) {
-//       CHECK:     scf.for %[[IV:.+]] = %c0 to %c144 step %c1 {{.*}} -> (vector<1x1x1x4x1xf32>)
-//       CHECK:       gpu.barrier
-//   CHECK-DAG:       vector.transfer_read {{.*}} #gpu.address_space<workgroup>>, vector<1xf32>
-//   CHECK-DAG:       vector.transfer_read {{.*}} #gpu.address_space<workgroup>>, vector<1xf32>
+//   CHECK-LABEL: func @unaligned_to_intrinsic_batched_matmul_nocpromo
+//     CHECK-NOT:   memref.alloc() {{.*}}xf32
+//     CHECK-DAG:   memref.alloc() : memref<1x4x66xf32, #gpu.address_space<workgroup>>
+//     CHECK-DAG:   memref.alloc() : memref<1x16x6xf32, #gpu.address_space<workgroup>>
+//     CHECK-DAG:   %[[B0:.+]] = hal.interface.binding.subspan layout({{.+}}) binding(0)
+//     CHECK-DAG:   %[[B1:.+]] = hal.interface.binding.subspan layout({{.+}}) binding(1)
+//     CHECK-DAG:   %[[B2:.+]] = hal.interface.binding.subspan layout({{.+}}) binding(2)
+//         CHECK:   scf.forall ({{.*}}) in (12, 37, 10) {
+//         CHECK:     scf.for %[[IV:.+]] = %c0 to %c144 step %c1 {{.*}} -> (vector<1x1x1x4x1xf32>)
+//         CHECK:       gpu.barrier
+//     CHECK-DAG:       vector.transfer_read {{.*}} #gpu.address_space<workgroup>>, vector<1xf32>
+//     CHECK-DAG:       vector.transfer_read {{.*}} #gpu.address_space<workgroup>>, vector<1xf32>
 // CHECK-COUNT-1:     amdgpu.mfma {{.*}}blocks = 1 : i32, k = 4 : i32, m = 16 : i32, n = 16 : i32
-//       CHECK:       scf.yield
-//   CHECK-NOT:     scf.for
-//       CHECK:   } {mapping = [#iree_codegen.workgroup_mapping<z>, #iree_codegen.workgroup_mapping<y>, #iree_codegen.workgroup_mapping<x>]}
+//         CHECK:     scf.yield
+//         CHECK: } {mapping = [#iree_codegen.workgroup_mapping<z>, #iree_codegen.workgroup_mapping<y>, #iree_codegen.workgroup_mapping<x>]}
 
 // -----
 
