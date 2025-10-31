@@ -4,10 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include <numeric>
-
-#include "iree/compiler/Codegen/Dialect/Codegen/Utils/Utils.h"
 #include "iree/compiler/Codegen/Dialect/GPU/IR/GPUTileSwizzleUtils.h"
+#include "iree/compiler/Codegen/Dialect/Codegen/Utils/Utils.h"
 #include "iree/compiler/Codegen/Dialect/GPU/IR/IREEGPUInterfaces.h"
 #include "iree/compiler/Dialect/Encoding/Utils/Utils.h"
 #include "llvm/Support/Debug.h"
@@ -23,7 +21,7 @@ using Kind = TileSwizzle::Dim::Kind;
 
 SmallVector<int64_t>
 sliceSwizzledShape(const TileSwizzle &swizzle,
-                   const std::function<bool(TileSwizzle::Dim)> &predicate) {
+                   llvm::function_ref<bool(TileSwizzle::Dim)> predicate) {
   SmallVector<int64_t> shape;
   for (TileSwizzle::ExpandShapeDimVectorType e : swizzle.expandShape) {
     for (TileSwizzle::Dim d : e) {
@@ -66,7 +64,7 @@ static void expand(TileSwizzle &swizzle, size_t srcIdx, TileSwizzle::Dim dim) {
   // Since we are not interleaving here, generating side-by-side copies of the
   // original layout, the new unrolling dimension is the new outermost
   // dimension. Existing entries get shifted to make room for it.
-  for (auto &p : swizzle.permutation) {
+  for (int64_t &p : swizzle.permutation) {
     p += (p >= dstIdx);
   }
   swizzle.permutation.insert(swizzle.permutation.begin(), dstIdx);
@@ -103,39 +101,13 @@ static void interleave(TileSwizzle &swizzle, size_t srcIdx, int expandedIdx) {
 template <typename MMAIntrinsicTy>
 static TileSwizzle getIntrinsicSwizzle(MMAIntrinsicTy intrinsic,
                                        unsigned operandIdx) {
-  IREE::GPU::MMASingleSubgroupLayout layout;
+  IREE::GPU::MMASingleSubgroupLayout layout =
+      IREE::GPU::getSingleSubgroupLayout(intrinsic, operandIdx);
   const bool isScaled =
       std::is_same<MMAIntrinsicTy, IREE::GPU::ScaledMMAIntrinsic>::value;
-  const unsigned lhsIdx = 0;
-  const unsigned rhsIdx = 1;
-  const unsigned lhsScalesIdx = 2;
-  const unsigned rhsScalesIdx = 3;
-  const bool isLHSorRHS = operandIdx == lhsIdx || operandIdx == rhsIdx;
-  if (isScaled) {
-    // The operand mapping for `getSingleSubgroupLayout` follows a different
-    // operand order than is used for TileSwizzle, so we need to remap the
-    // operandIdx to get the right layout. The layouts for TileSwizzle vs.
-    // `getSingleSubgroupLayout` are shown below:
-    //             | TileSwizzle | getSingleSubgroupLayout
-    //         LHS | 0           | 0
-    //         RHS | 1           | 2
-    //  LHS Scales | 2           | 1
-    //  RHS Scales | 3           | 3
-    //         ACC | 4           | 4
-    // TODO(Max191): Decide on a consistent operand order for both.
-    int64_t layoutOperandIdx = operandIdx;
-    if (operandIdx == rhsIdx) {
-      layoutOperandIdx = 2;
-    } else if (operandIdx == lhsScalesIdx) {
-      layoutOperandIdx = 1;
-    }
-    layout = IREE::GPU::getSingleSubgroupLayout(
-        static_cast<ScaledMMAIntrinsic>(intrinsic), layoutOperandIdx);
-  } else {
-    layout = IREE::GPU::getSingleSubgroupLayout(
-        static_cast<MMAIntrinsic>(intrinsic),
-        static_cast<IREE::GPU::MMAFragment>(operandIdx));
-  }
+  const bool isLhs = isIntrinsicLhs<MMAIntrinsicTy>(operandIdx);
+  const bool isRhs = isIntrinsicRhs<MMAIntrinsicTy>(operandIdx);
+  const bool isRhsScale = isIntrinsicRhsScale<MMAIntrinsicTy>(operandIdx);
 
   // MMASingleSubgroupLayout has non-transposed RHS and RHS scales, but
   // TileSwizzle has transposed RHS and RHS scales, so reorder the `layout`
@@ -145,7 +117,7 @@ static TileSwizzle getIntrinsicSwizzle(MMAIntrinsicTy intrinsic,
     // rotate right by 1 element to swap [K, Kb] and N.
     std::rotate(v.begin(), v.end() - 1, v.end());
   };
-  if (operandIdx == rhsIdx || (isScaled && operandIdx == rhsScalesIdx)) {
+  if (isRhs || isRhsScale) {
     swapRHSKAndN(layout.outer);
     swapRHSKAndN(layout.thread);
     swapRHSKAndN(layout.tstrides);
@@ -157,7 +129,7 @@ static TileSwizzle getIntrinsicSwizzle(MMAIntrinsicTy intrinsic,
   // All other operands (and LHS/RHS for non-scaled matmuls) have 2 source
   // dimensions. These correspond to the arrays in `layout` all having a
   // matching size. Let's just guard that assumption with one assert here.
-  const unsigned numSrcDims = isScaled && isLHSorRHS ? 3 : 2;
+  const unsigned numSrcDims = isScaled && (isLhs || isRhs) ? 3 : 2;
   assert(layout.thread.size() == numSrcDims &&
          "expected layout rank to match the number of source dims");
   swizzle.expandShape.resize(numSrcDims);
@@ -174,9 +146,7 @@ static TileSwizzle getIntrinsicSwizzle(MMAIntrinsicTy intrinsic,
   }
   // Next come `layout.thread` dims.
   int64_t subgroupSize = getIntrinsicSubgroupSize(intrinsic);
-  int64_t numThreadsInLayout =
-      std::reduce(layout.thread.begin(), layout.thread.end(), 1LL,
-                  std::multiplies<int64_t>());
+  int64_t numThreadsInLayout = llvm::product_of(layout.thread);
   assert(subgroupSize % numThreadsInLayout == 0 &&
          "expected subgroupSize to be divisible by numThreadsInLayout");
   assert(subgroupSize >= numThreadsInLayout &&
@@ -237,16 +207,14 @@ static size_t getInnermostNonInternalDimIdx(
 template <typename MMAAttrTy>
 static TileSwizzle getSwizzleImpl(MMAAttrTy mma, unsigned operandIdx) {
   TileSwizzle swizzle = getIntrinsicSwizzle(mma.getIntrinsic(), operandIdx);
-  const bool isScaled =
-      std::is_same<MMAAttrTy, IREE::GPU::DataTiledScaledMMAAttr>::value;
-  const unsigned lhsIdx = 0;
-  const unsigned rhsIdx = 1;
-  const unsigned lhsScalesIdx = 2;
-  const unsigned rhsScalesIdx = 3;
-  const unsigned accIdx = isScaled ? 4 : 2;
-  const bool isRhsScales = isScaled && operandIdx == rhsScalesIdx;
-  const bool isLhsScales = isScaled && operandIdx == lhsScalesIdx;
-  if (operandIdx == lhsIdx || isLhsScales) {
+  using MMAIntrinsicTy = decltype(mma.getIntrinsic());
+  const bool isScaled = std::is_same<MMAIntrinsicTy, ScaledMMAIntrinsic>::value;
+  const bool isLhs = isIntrinsicLhs<MMAIntrinsicTy>(operandIdx);
+  const bool isRhs = isIntrinsicRhs<MMAIntrinsicTy>(operandIdx);
+  const bool isAcc = isIntrinsicAcc<MMAIntrinsicTy>(operandIdx);
+  const bool isLhsScale = isIntrinsicLhsScale<MMAIntrinsicTy>(operandIdx);
+  const bool isRhsScale = isIntrinsicRhsScale<MMAIntrinsicTy>(operandIdx);
+  if (isLhs || isLhsScale) {
     // A-matrix (LHS). Source dimensions are M (index 0) and K (index 1).
     // Unroll on K with interleaving, then on M.
     if (mma.getIntrinsicsK() > 1) {
@@ -257,10 +225,10 @@ static TileSwizzle getSwizzleImpl(MMAAttrTy mma, unsigned operandIdx) {
       // the unrolled scales with each vector load, so we need to interleave at
       // the very last dimension for the scales. For the LHS, we load in blocks,
       // so we don't need to interleave.
-      if (isLhsScales) {
+      if (isLhsScale) {
         interleavingIdx = swizzle.expandShape[1].size() - 1;
       }
-      if (!isScaled || isLhsScales) {
+      if (!isScaled || isLhsScale) {
         interleave(swizzle, 1, interleavingIdx);
       }
     }
@@ -276,7 +244,7 @@ static TileSwizzle getSwizzleImpl(MMAAttrTy mma, unsigned operandIdx) {
                            mma.getSubgroupsM() * mma.getSubgroupsN());
       expand(swizzle, 0, dim);
     }
-  } else if (operandIdx == rhsIdx || isRhsScales) {
+  } else if (isRhs || isRhsScale) {
     // B-matrix (RHS). Since the pack ops already took care of transposing B,
     // source dimensions are N (index 0) and K (index 1).
     // Unroll on K with interleaving, then on N.
@@ -286,10 +254,10 @@ static TileSwizzle getSwizzleImpl(MMAAttrTy mma, unsigned operandIdx) {
           getInnermostNonInternalDimIdx(swizzle.expandShape[1]);
       // Like with the LHS above, we want to interleave such that we load all
       // the unrolled scales with each vector load.
-      if (isRhsScales) {
+      if (isRhsScale) {
         interleavingIdx = swizzle.expandShape[1].size() - 1;
       }
-      if (!isScaled || isRhsScales) {
+      if (!isScaled || isRhsScale) {
         interleave(swizzle, 1, interleavingIdx);
       }
     }
@@ -299,7 +267,7 @@ static TileSwizzle getSwizzleImpl(MMAAttrTy mma, unsigned operandIdx) {
     if (mma.getSubgroupsN() > 1) {
       expand(swizzle, 0, {Kind::CrossThread, mma.getSubgroupsN()});
     }
-  } else if (operandIdx == accIdx) {
+  } else if (isAcc) {
     // C-matrix (accumulator). Source dimensions are M (index 0) and N (index
     // 1). Unroll on N, then on M.
     if (mma.getIntrinsicsN() > 1) {
@@ -323,9 +291,8 @@ TileSwizzle getSwizzle(IREE::GPU::DataTiledScaledMMAAttr scaledMma,
   return getSwizzleImpl(scaledMma, operandIdx);
 }
 
-TileSwizzle getSwizzle(IREE::GPU::DataTiledMMAAttr mma,
-                       IREE::GPU::MMAFragment fragment) {
-  return getSwizzleImpl(mma, static_cast<unsigned>(fragment));
+TileSwizzle getSwizzle(IREE::GPU::DataTiledMMAAttr mma, int operandIndex) {
+  return getSwizzleImpl(mma, operandIndex);
 }
 
 /// Remove the expanded dimensions for this index and update the permutation by
