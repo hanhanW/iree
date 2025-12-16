@@ -126,12 +126,6 @@ void buildStreamTensorPassPipeline(OpPassManager &passManager,
   // Bring all initializers together so that we can schedule them.
   passManager.addPass(IREE::Util::createCombineInitializersPass());
 
-  // Unify encodings for globals, which ensures that we don't increase memory
-  // footprint significantly, unless the program explicitly requires it.
-  if (clUnifyEncodingForGlobals) {
-    passManager.addPass(IREE::Stream::createUnifyEncodingForGlobalsPass());
-  }
-
   // After combining initializers and encoding unification we can end up with a
   // lot of redundant code internally and may be able to eliminate some globals
   // entirely (by either fusing globals always set to the same values or by
@@ -144,6 +138,16 @@ void buildStreamTensorPassPipeline(OpPassManager &passManager,
   // fold duplicate arguments/results and inline constants to allow the local
   // optimizations to work more effectively.
   {
+    OpPassManager ipoPipeline(mlir::ModuleOp::getOperationName());
+    buildStreamCleanupPassPipeline(ipoPipeline, transformOptions);
+    passManager.addPass(
+        IREE::Util::createFixedPointIteratorPass(std::move(ipoPipeline)));
+  }
+
+  // Unify encodings for globals, which ensures that we don't increase memory
+  // footprint significantly, unless the program explicitly requires it.
+  if (clUnifyEncodingForGlobals) {
+    passManager.addPass(IREE::Stream::createUnifyEncodingForGlobalsPass());
     OpPassManager ipoPipeline(mlir::ModuleOp::getOperationName());
     buildStreamCleanupPassPipeline(ipoPipeline, transformOptions);
     passManager.addPass(
