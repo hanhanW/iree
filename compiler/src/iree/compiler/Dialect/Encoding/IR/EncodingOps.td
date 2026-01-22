@@ -39,6 +39,7 @@ def IREEEncoding_SetEncodingOp : IREEEncoding_PureOp<"set_encoding",[
   }];
 
   let hasVerifier = 1;
+  let hasCanonicalizer = 1;
 
   let extraClassDeclaration = [{
     RankedTensorType getSourceType() {

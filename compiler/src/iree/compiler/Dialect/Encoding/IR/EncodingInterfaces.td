@@ -395,7 +395,7 @@ def IREEEncoding_EncodingTypeInterface :
   let methods = [
     InterfaceMethod<
       [{
-        Returns the tensor type with the encoding.
+        Returns the tensor type that holds the encoding.
       }],
       /*retTy=*/"::mlir::Type",
       /*methodName=*/"getEncodingType",
@@ -403,7 +403,18 @@ def IREEEncoding_EncodingTypeInterface :
     >,
     InterfaceMethod<
       [{
-        Returns the same type but with the updated encoding.
+        Returns the encoding attribute from the type, or nullptr if none.
+      }],
+      /*retTy=*/"::mlir::Attribute",
+      /*methodName=*/"getEncoding",
+      /*args=*/(ins)
+    >,
+    InterfaceMethod<
+      [{
+        Returns a new type with the encoding replaced by the given attribute.
+
+        The returned type has the same structure as the original but with the
+        updated encoding. Pass nullptr to remove the encoding.
       }],
       /*retTy=*/"::mlir::Type",
       /*methodName=*/"updateEncoding",
