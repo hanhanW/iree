@@ -686,6 +686,27 @@ def SpecializeEncodingsPass :
   ];
 }
 
+def DeduplicateDispatchResultBindingsPass :
+    Pass<"iree-stream-deduplicate-dispatch-result-bindings", "mlir::ModuleOp"> {
+  let summary = "Deduplicates result bindings that store identical tensor values.";
+  let description = [{
+    After encoding specialization and CSE, multiple result bindings may store
+    the same tensor value within an executable. This results in duplicate
+    memory allocations at dispatch sites even though the outputs contain
+    identical data.
+
+    This pass identifies such duplicates by analyzing `DispatchTensorStoreOp`
+    operations within executables to find bindings that store the same SSA
+    value. It then verifies that deduplication is safe across all dispatch
+    sites (e.g., same device affinity) before removing the duplicate bindings
+    and updating all dispatch sites to use the single remaining result.
+  }];
+  let dependentDialects = [
+    "IREE::Stream::StreamDialect",
+    "IREE::TensorExt::IREETensorExtDialect",
+  ];
+}
+
 def AnnotateDispatchArgumentsPass :
     Pass<"iree-stream-annotate-dispatch-arguments", "mlir::ModuleOp"> {
   let summary = "Annotates dispatch arguments with potential values derived from dispatch sites.";

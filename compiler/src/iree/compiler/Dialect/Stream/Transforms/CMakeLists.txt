@@ -24,6 +24,7 @@ iree_cc_library(
     "AutomaticReferenceCounting.cpp"
     "CloneToConsumers.cpp"
     "ConvertToStream.cpp"
+    "DeduplicateDispatchResultBindings.cpp"
     "DumpStatistics.cpp"
     "ElideAsyncCopies.cpp"
     "ElideTimepoints.cpp"

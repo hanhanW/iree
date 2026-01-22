@@ -183,6 +183,10 @@ void buildStreamAsyncPassPipeline(OpPassManager &passManager,
 
   // Specialize the encodings before the lowering of stream tensor ops.
   passManager.addPass(IREE::Stream::createSpecializeEncodingsPass());
+  passManager.addPass(mlir::createCanonicalizerPass());
+  passManager.addPass(createCSEPass());
+  passManager.addPass(
+      IREE::Stream::createDeduplicateDispatchResultBindingsPass());
 
   // Lower stream.tensor.* ops to stream.async.* ops based on
   // affinity/configuration assigned during placement.

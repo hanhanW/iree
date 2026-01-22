@@ -25,6 +25,7 @@ iree_lit_test_suite(
             "automatic_reference_counting_scf.mlir",
             "clone_to_consumers.mlir",
             "convert_to_stream.mlir",
+            "deduplicate_dispatch_result_bindings.mlir",
             "dump_statistics.mlir",
             "elide_async_copies.mlir",
             "elide_async_copies_scf.mlir",
