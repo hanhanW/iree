@@ -355,3 +355,84 @@ func.func @expand_cpu_target_f4e2m1fn(%arg0 : f4E2M1FN) -> f4E2M1FN attributes
     %0 = arith.negf %arg0 : f4E2M1FN
     return %0 : f4E2M1FN
 }
+
+// -----
+
+// Test VMVX target with f8E4M3FNUZ - same CPU-style bit-manipulation emulation.
+//
+// CHECK-LABEL: func.func @expand_vmvx_target_f8e4m3fnuz
+// CHECK-SAME:    (%[[ARG0:.*]]: f8E4M3FNUZ) -> f8E4M3FNUZ
+//
+// ExtF emulation: fp8 -> i8 -> i32 -> extract fields -> pack f32 -> bitcast
+// CHECK:         %[[BITCAST_IN:.*]] = arith.bitcast %[[ARG0]] : f8E4M3FNUZ to i8
+// CHECK:         %[[EXT_I32:.*]] = arith.extui %[[BITCAST_IN]] : i8 to i32
+// CHECK:         arith.shrui
+// CHECK:         arith.andi
+// CHECK:         arith.bitcast %{{.*}} : i32 to f32
+//
+// Negf on f32
+// CHECK:         %[[NEG:.*]] = arith.negf %{{.*}} : f32
+//
+// TruncF emulation: f32 -> bitcast i32 -> extract fields -> pack i8 -> bitcast fp8
+// CHECK:         arith.bitcast %[[NEG]] : f32 to i32
+// CHECK:         arith.shrui
+// CHECK:         arith.andi
+// CHECK:         arith.trunci %{{.*}} : i32 to i8
+// CHECK:         %[[RESULT:.*]] = arith.bitcast %{{.*}} : i8 to f8E4M3FNUZ
+// CHECK:         return %[[RESULT]] : f8E4M3FNUZ
+func.func @expand_vmvx_target_f8e4m3fnuz(%arg0 : f8E4M3FNUZ) -> f8E4M3FNUZ attributes
+{ hal.executable.target = #hal.executable.target<"vmvx", "vmvx-bytecode-fb">}{
+    %0 = arith.negf %arg0 : f8E4M3FNUZ
+    return %0 : f8E4M3FNUZ
+}
+
+// -----
+
+// Test VMVX target with f8E5M2FNUZ.
+//
+// CHECK-LABEL: func.func @expand_vmvx_target_f8e5m2fnuz
+// CHECK-SAME:    (%[[ARG0:.*]]: f8E5M2FNUZ) -> f8E5M2FNUZ
+// CHECK:         %[[BITCAST_IN:.*]] = arith.bitcast %[[ARG0]] : f8E5M2FNUZ to i8
+// CHECK:         %[[EXT_I32:.*]] = arith.extui %[[BITCAST_IN]] : i8 to i32
+// CHECK:         arith.bitcast %{{.*}} : i32 to f32
+// CHECK:         %[[ADD:.*]] = arith.addf %{{.*}}, %{{.*}} : f32
+// CHECK:         arith.bitcast %[[ADD]] : f32 to i32
+// CHECK:         arith.trunci %{{.*}} : i32 to i8
+// CHECK:         %[[RESULT:.*]] = arith.bitcast %{{.*}} : i8 to f8E5M2FNUZ
+// CHECK:         return %[[RESULT]] : f8E5M2FNUZ
+func.func @expand_vmvx_target_f8e5m2fnuz(%arg0 : f8E5M2FNUZ) -> f8E5M2FNUZ attributes
+{ hal.executable.target = #hal.executable.target<"vmvx", "vmvx-bytecode-fb">}{
+    %c = arith.constant 1.0 : f8E5M2FNUZ
+    %0 = arith.addf %arg0, %c : f8E5M2FNUZ
+    return %0 : f8E5M2FNUZ
+}
+
+// -----
+
+// Test VMVX target with f4E2M1FN - both extf and truncf should be emulated.
+//
+// CHECK-LABEL: func.func @expand_vmvx_target_f4e2m1fn
+// CHECK-SAME:    (%[[ARG0:.*]]: f4E2M1FN) -> f4E2M1FN
+//
+// ExtF emulation: fp4 -> i4 -> i32 -> extract fields -> pack f32 -> bitcast
+// CHECK:         %[[BITCAST_IN:.*]] = arith.bitcast %[[ARG0]] : f4E2M1FN to i4
+// CHECK:         %[[EXT_I32:.*]] = arith.extui %[[BITCAST_IN]] : i4 to i32
+// CHECK:         arith.shrui
+// CHECK:         arith.andi
+// CHECK:         arith.bitcast %{{.*}} : i32 to f32
+//
+// Negf on f32
+// CHECK:         %[[NEG:.*]] = arith.negf %{{.*}} : f32
+//
+// TruncF emulation: f32 -> bitcast i32 -> extract fields -> pack i4 -> bitcast fp4
+// CHECK:         arith.bitcast %[[NEG]] : f32 to i32
+// CHECK:         arith.shrui
+// CHECK:         arith.andi
+// CHECK:         arith.trunci %{{.*}} : i32 to i4
+// CHECK:         %[[RESULT:.*]] = arith.bitcast %{{.*}} : i4 to f4E2M1FN
+// CHECK:         return %[[RESULT]] : f4E2M1FN
+func.func @expand_vmvx_target_f4e2m1fn(%arg0 : f4E2M1FN) -> f4E2M1FN attributes
+{ hal.executable.target = #hal.executable.target<"vmvx", "vmvx-bytecode-fb">}{
+    %0 = arith.negf %arg0 : f4E2M1FN
+    return %0 : f4E2M1FN
+}

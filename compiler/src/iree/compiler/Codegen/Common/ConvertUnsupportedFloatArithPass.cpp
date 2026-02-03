@@ -797,8 +797,8 @@ void ConvertUnsupportedFloatArithPass::runOnOperation() {
   Type targetType = nullptr;
 
   auto targetAttr = IREE::HAL::ExecutableTargetAttr::lookup(funcOp);
-  bool isCPU = isLLVMCPUBackend(targetAttr);
-  if (isCPU) {
+  bool isCpuOrVMVX = isLLVMCPUBackend(targetAttr) || isVMVXBackend(targetAttr);
+  if (isCpuOrVMVX) {
     populateCPUSourceAndTargetType(context, funcOp, sourceTypes, targetType);
   } else if (isROCMBackend(targetAttr)) {
     populateGPUSourceAndTargetType(context, funcOp, sourceTypes, targetType);
@@ -837,7 +837,7 @@ void ConvertUnsupportedFloatArithPass::runOnOperation() {
   // For CPU, emulate extf/truncf to/from small float types using integer ops.
   // This is needed because LLVM doesn't support fpext/fptrunc for fp4/fp8
   // types; these types eventually get lowered to small integers in LLVM IR.
-  if (isCPU) {
+  if (isCpuOrVMVX) {
     RewritePatternSet emulationPatterns(context);
     emulationPatterns.add<TruncFToSmallFloat, ExtFFromSmallFloat>(context);
     walkAndApplyPatterns(funcOp, std::move(emulationPatterns));
