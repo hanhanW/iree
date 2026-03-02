@@ -7,11 +7,11 @@
 #include "iree/compiler/Codegen/Dialect/VectorExt/IR/VectorExtDialect.h"
 #include "iree/compiler/Codegen/Dialect/VectorExt/Transforms/Passes.h"
 #include "iree/compiler/Codegen/Dialect/VectorExt/Transforms/Transforms.h"
+#include "iree/compiler/Codegen/Interfaces/VectorizableOpInterface.h"
 #include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtOps.h"
 #include "iree/compiler/Dialect/LinalgExt/Utils/Utils.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Linalg/Transforms/Transforms.h"
-#include "mlir/Dialect/UB/IR/UBOps.h"
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/Dialect/Vector/Utils/VectorUtils.h"
 #include "mlir/IR/Builders.h"
@@ -28,81 +28,21 @@ struct VectorizeToLayoutOpPattern final
     : OpRewritePattern<IREE::VectorExt::ToLayoutOp> {
   using Base::Base;
 
-  vector::TransferReadOp
-  createReadOp(PatternRewriter &rewriter,
-               IREE::VectorExt::ToLayoutOp toLayoutOp) const {
-    Location loc = toLayoutOp.getLoc();
-    ShapedType inputTy = toLayoutOp.getType();
-    auto zero = arith::ConstantIndexOp::create(rewriter, loc, 0);
-    auto identityMap = rewriter.getMultiDimIdentityMap(inputTy.getRank());
-    SmallVector<int64_t> readShape =
-        toLayoutOp.getLayout().getUndistributedShape();
-    Value mask = nullptr;
-    if (!toLayoutOp.getType().hasStaticShape()) {
-      SmallVector<OpFoldResult> mixedSourceDims =
-          tensor::getMixedSizes(rewriter, loc, toLayoutOp.getInput());
-      auto maskType = VectorType::get(readShape, rewriter.getI1Type());
-      mask = vector::CreateMaskOp::create(rewriter, loc, maskType,
-                                          mixedSourceDims);
-    }
-    VectorType vectorType =
-        VectorType::get(readShape, inputTy.getElementType());
-    auto inBounds = rewriter.getBoolArrayAttr(
-        SmallVector<bool>(vectorType.getRank(), true));
-    auto padValue =
-        ub::PoisonOp::create(rewriter, loc, inputTy.getElementType());
-    auto read = vector::TransferReadOp::create(
-        rewriter, loc,
-        /*type=*/vectorType,
-        /*source=*/toLayoutOp.getInput(),
-        /*indices=*/ValueRange{SmallVector<Value>(readShape.size(), zero)},
-        /*permutation_map=*/identityMap,
-        /*padding=*/padValue,
-        /*mask=*/mask,
-        /*in_bounds=*/inBounds);
-    return read;
-  }
-
-  vector::TransferWriteOp
-  createWriteOp(PatternRewriter &rewriter,
-                IREE::VectorExt::ToLayoutOp tensorLayoutOp,
-                Value vectorLayoutOp, Value mask) const {
-    Location loc = tensorLayoutOp.getLoc();
-    ShapedType tensorTy = tensorLayoutOp.getType();
-    auto resType =
-        RankedTensorType::get(tensorTy.getShape(), tensorTy.getElementType());
-    auto zero = arith::ConstantIndexOp::create(rewriter, loc, 0);
-    int64_t rank = tensorTy.getShape().size();
-    auto inBounds = rewriter.getBoolArrayAttr(SmallVector<bool>(rank, true));
-    auto identityMap = rewriter.getMultiDimIdentityMap(tensorTy.getRank());
-    return vector::TransferWriteOp::create(
-        rewriter, loc,
-        /*result=*/resType,
-        /*vector=*/vectorLayoutOp,
-        /*source=*/tensorLayoutOp.getInput(),
-        /*indices=*/ValueRange{SmallVector<Value>(rank, zero)},
-        /*permutation_map=*/identityMap,
-        /*mask=*/mask,
-        /*inBounds=*/inBounds);
-  }
-
   LogicalResult matchAndRewrite(IREE::VectorExt::ToLayoutOp toLayoutOp,
                                 PatternRewriter &rewriter) const override {
-    if (!toLayoutOp.hasTensorSemantics()) {
+    auto vectorizableOp =
+        cast<VectorizableOpInterface>(toLayoutOp.getOperation());
+    SmallVector<int64_t> vectorSizes;
+    SmallVector<bool> scalableDims;
+    if (!vectorizableOp.isVectorizable(vectorSizes, scalableDims)) {
       return failure();
     }
-    OpBuilder::InsertionGuard g(rewriter);
-    rewriter.setInsertionPoint(toLayoutOp);
-    Location loc = toLayoutOp.getLoc();
-    vector::TransferReadOp readOp = createReadOp(rewriter, toLayoutOp);
-    // Create the toLayout operation but with vector types instead.
-    auto newLayoutOp = IREE::VectorExt::ToLayoutOp::create(
-        rewriter, loc, readOp, toLayoutOp.getLayout(),
-        toLayoutOp.getSharedMemoryConversion());
-    // Create the write back to a tensor.
-    vector::TransferWriteOp writeOp =
-        createWriteOp(rewriter, toLayoutOp, newLayoutOp, readOp.getMask());
-    rewriter.replaceOp(toLayoutOp, writeOp);
+    FailureOr<SmallVector<Value>> result =
+        vectorizableOp.vectorize(rewriter, vectorSizes, scalableDims);
+    if (failed(result)) {
+      return failure();
+    }
+    rewriter.replaceOp(toLayoutOp, *result);
     return success();
   }
 };
@@ -110,7 +50,6 @@ struct VectorizeToLayoutOpPattern final
 struct VectorizeIREEVectorExtOpsPass final
     : impl::VectorizeIREEVectorExtOpsPassBase<VectorizeIREEVectorExtOpsPass> {
   void runOnOperation() override {
-
     MLIRContext *ctx = &getContext();
     RewritePatternSet patterns(ctx);
     patterns.add<VectorizeToLayoutOpPattern>(ctx);
