@@ -482,6 +482,8 @@ static void addLowerToLLVMPasses(OpPassManager &modulePassManager,
   modulePassManager.addPass(createLowerUKernelOpsToCallsPass());
 
   FunctionLikeNest(modulePassManager)
+      // Decompose vectorized+bufferized map_store ops before lowering to loops.
+      .addPass(IREE::LinalgExt::createDecomposeMapStorePass)
       // LinalgExt -> SCF
       .addPass(IREE::LinalgExt::createLinalgExtToLoopsPass)
       // Linalg -> SCF
