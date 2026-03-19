@@ -140,6 +140,7 @@ iree_cc_library(
     "Passes.cpp"
     "PatchFuncOps.cpp"
     "PropagateConstantOffsets.cpp"
+    "PropagateDispatchConfig.cpp"
     "PropagateDispatchSizeBounds.cpp"
     "PropagateReshapesByExpansion.cpp"
     "ReconcileTranslationInfo.cpp"
