@@ -244,8 +244,7 @@ spirv::ResourceLimitsAttr convertLimits(IREE::GPU::TargetAttr target) {
 //===----------------------------------------------------------------------===//
 
 FailureOr<spirv::TargetEnvAttr>
-convertGPUTarget(MLIRContext *context, IREE::HAL::ExecutableVariantOp variant) {
-  IREE::HAL::ExecutableTargetAttr target = variant.getTarget();
+convertGPUTarget(MLIRContext *context, IREE::HAL::ExecutableTargetAttr target) {
   IREE::GPU::TargetAttr gpuTarget = getGPUTargetAttr(context, target);
 
   SmallVector<StringRef> features;
@@ -257,8 +256,7 @@ convertGPUTarget(MLIRContext *context, IREE::HAL::ExecutableVariantOp variant) {
 
   std::optional<Version> version = deduceVersion(features);
   if (!version) {
-    return variant.emitError("cannot deduce spirv version from target "
-                             "features; need to specify 'spirv1.x'");
+    return failure();
   }
   processCapabilities(features, caps);
   processExtensions(features, exts);
@@ -271,12 +269,17 @@ convertGPUTarget(MLIRContext *context, IREE::HAL::ExecutableVariantOp variant) {
   addDotProductFeatures(compute, wgp.getDot().getValue(), caps, exts);
   addMatrixFeatures(wgp.getMma(), caps, exts, coopMatAttrs);
 
-  auto triple = spirv::VerCapExtAttr::get(
-      *version, caps.getArrayRef(), exts.getArrayRef(), variant.getContext());
+  auto triple = spirv::VerCapExtAttr::get(*version, caps.getArrayRef(),
+                                          exts.getArrayRef(), context);
   return spirv::TargetEnvAttr::get(
       triple, convertLimits(gpuTarget), deduceClientAPI(target.getBackend()),
       deduceVendor(gpuTarget), spirv::DeviceType::Unknown,
       spirv::TargetEnvAttr::kUnknownDeviceID);
+}
+
+FailureOr<spirv::TargetEnvAttr>
+convertGPUTarget(MLIRContext *context, IREE::HAL::ExecutableVariantOp variant) {
+  return convertGPUTarget(context, variant.getTarget());
 }
 
 struct SPIRVConvertGPUTargetPass final
@@ -287,8 +290,40 @@ struct SPIRVConvertGPUTargetPass final
 
   void runOnOperation() override {
     mlir::ModuleOp moduleOp = getOperation();
-    auto variant = moduleOp->getParentOfType<IREE::HAL::ExecutableVariantOp>();
     MLIRContext *context = &getContext();
+
+    auto variant = moduleOp->getParentOfType<IREE::HAL::ExecutableVariantOp>();
+    if (!variant) {
+      // No variant parent — try to get the target from a function's
+      // hal.executable.target attribute, or fall back to the CLI flag.
+      IREE::HAL::ExecutableTargetAttr target;
+      for (auto funcOp : moduleOp.getOps<mlir::FunctionOpInterface>()) {
+        target = IREE::HAL::ExecutableTargetAttr::lookup(funcOp);
+        if (target) {
+          break;
+        }
+      }
+      if (!target) {
+        // Fall back to CLI GPU target.
+        IREE::GPU::TargetAttr gpuTarget = getCLGPUTarget(context);
+        if (!gpuTarget) {
+          return;
+        }
+        SmallVector<NamedAttribute> configItems;
+        addConfigGPUTarget(context, gpuTarget, configItems);
+        target = IREE::HAL::ExecutableTargetAttr::get(
+            context, StringAttr::get(context, "vulkan-spirv"),
+            StringAttr::get(context, "vulkan-spirv-fb"),
+            DictionaryAttr::get(context, configItems));
+      }
+      FailureOr<spirv::TargetEnvAttr> spirvTarget =
+          convertGPUTarget(context, target);
+      if (failed(spirvTarget)) {
+        return signalPassFailure();
+      }
+      moduleOp->setAttr(spirv::getTargetEnvAttrName(), *spirvTarget);
+      return;
+    }
 
     FailureOr<spirv::TargetEnvAttr> spirvTarget =
         convertGPUTarget(context, variant);

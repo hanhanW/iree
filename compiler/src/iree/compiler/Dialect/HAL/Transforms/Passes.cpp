@@ -397,15 +397,6 @@ void buildHALTransformPassPipeline(OpPassManager &passManager,
                                     clSubstituteExecutableConfiguration,
                                     clSubstituteExecutableConfigurationsFrom);
 
-    // Dump standalone hal.executable benchmark modules.
-    // Today this only works for executables that have static dispatch
-    // parameters and is only useful for basic microbenchmarking. We do this
-    // after configuration to make it easy to tweak configurations directly
-    // from the benchmark.
-    if (!targetOptions.executableBenchmarksPath.empty()) {
-      passManager.addPass(IREE::HAL::createDumpExecutableBenchmarksPass(
-          {targetOptions.executableBenchmarksPath}));
-    }
   }
 
   if (hooks.afterPhase) {
@@ -442,6 +433,14 @@ void buildHALTransformPassPipeline(OpPassManager &passManager,
   if (targetOptions.debugLevel >= 3) {
     passManager.addPass(
         IREE::HAL::createCaptureExecutableSourcesPass({"2.translated"}));
+  }
+
+  // Dump standalone hal.executable benchmark modules.
+  // This runs after translation so that workgroup_size has been propagated
+  // from dispatch_config to the export ops.
+  if (!targetOptions.executableBenchmarksPath.empty()) {
+    passManager.addPass(IREE::HAL::createDumpExecutableBenchmarksPass(
+        {targetOptions.executableBenchmarksPath}));
   }
 
   if (hooks.afterPhase) {

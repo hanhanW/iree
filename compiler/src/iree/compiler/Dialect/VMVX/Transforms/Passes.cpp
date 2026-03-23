@@ -33,8 +33,7 @@ namespace mlir::iree_compiler::IREE::VMVX {
 // Variant configuration
 // ---------------------------------------------------------------------------
 
-void buildVMVXConfigurationPassPipeline(OpPassManager &variantPassManager) {
-  OpPassManager &modulePassManager = variantPassManager.nest<ModuleOp>();
+void buildVMVXConfigurationPassPipeline(OpPassManager &modulePassManager) {
   {
     FunctionLikeNest funcPassManager(modulePassManager);
     // ---------------------------------------------------------------------------
@@ -56,34 +55,27 @@ void buildVMVXConfigurationPassPipeline(OpPassManager &variantPassManager) {
 // ---------------------------------------------------------------------------
 
 static void
-buildVectorVMVXTransformPassPipeline(OpPassManager &variantPassManager) {
-  variantPassManager.addPass(createCreateDispatchConfigPass());
-
+buildVectorVMVXTransformPassPipeline(OpPassManager &modulePassManager) {
   // ---------------------------------------------------------------------------
   // Tensor-level optimization, kernel dispatch and lower to buffers.
   // ---------------------------------------------------------------------------
-  {
-    OpPassManager &modulePassManager = variantPassManager.nest<ModuleOp>();
-    FunctionLikeNest(modulePassManager)
-        .addPass(createVMVXLowerExecutableTargetPass);
+  FunctionLikeNest(modulePassManager)
+      .addPass(createVMVXLowerExecutableTargetPass);
 
-    // Resolve workgroup distribution before lowering ukernels to calls.
-    // CPULowerToUKernelsPass (inside VMVXLowerExecutableTargetPass) lowers
-    // iree_codegen.query_tile_sizes to iree_codegen.ukernel.generic which is
-    // memory-effect-free at the tensor level (no memref operands). The WAR
-    // hack in materializeSliceFromOrdinals replaces it with a constant in
-    // the count region. After LowerUKernelOpsToCallsPass it becomes a
-    // func.call which is memory-effecting and would be rejected by the
-    // backward slice.
-    modulePassManager.addPass(createReconcileTranslationInfoPass());
-    modulePassManager.addPass(createResolveWorkgroupCountHintsPass());
-  }
-  variantPassManager.addPass(createPropagateDispatchConfigPass());
+  // Resolve workgroup distribution before lowering ukernels to calls.
+  // CPULowerToUKernelsPass (inside VMVXLowerExecutableTargetPass) lowers
+  // iree_codegen.query_tile_sizes to iree_codegen.ukernel.generic which is
+  // memory-effect-free at the tensor level (no memref operands). The WAR
+  // hack in materializeSliceFromOrdinals replaces it with a constant in
+  // the count region. After LowerUKernelOpsToCallsPass it becomes a
+  // func.call which is memory-effecting and would be rejected by the
+  // backward slice.
+  modulePassManager.addPass(createReconcileTranslationInfoPass());
+  modulePassManager.addPass(createResolveWorkgroupCountHintsPass());
 
   // ---------------------------------------------------------------------------
   // Linalg -> Vectors
   // ---------------------------------------------------------------------------
-  OpPassManager &modulePassManager = variantPassManager.nest<ModuleOp>();
   modulePassManager.addPass(createLowerUKernelOpsToCallsPass());
 
   FunctionLikeNest(modulePassManager)
@@ -142,18 +134,17 @@ static void buildLoopOptimizationVMVXTransformPassPipeline(
       .addPass(createIREELoopInvariantCodeMotionPass);
 }
 
-void buildVMVXTransformPassPipeline(OpPassManager &variantPassManager) {
+void buildVMVXTransformPassPipeline(OpPassManager &modulePassManager) {
   // ---------------------------------------------------------------------------
   // Linalg -> Scalars/Vectors
   // ---------------------------------------------------------------------------
 
-  buildVectorVMVXTransformPassPipeline(variantPassManager);
+  buildVectorVMVXTransformPassPipeline(modulePassManager);
 
   // ---------------------------------------------------------------------------
   // Standard/Vector/HAL/etc -> VMVX conversion
   // ---------------------------------------------------------------------------
 
-  OpPassManager &modulePassManager = variantPassManager.nest<mlir::ModuleOp>();
   modulePassManager.addPass(createMaterializeConstantsPass());
   modulePassManager.addPass(createConversionPass());
 

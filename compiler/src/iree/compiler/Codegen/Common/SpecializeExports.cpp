@@ -441,8 +441,9 @@ public:
     for (auto exportOp : exports) {
       IntegerAttr ordinalAttr = exportOp.getOrdinalAttr();
       if (!ordinalAttr) {
-        exportOp.emitError("Missing export ordinal for specialization.");
-        return signalPassFailure();
+        // Exports without ordinals (e.g. from hal.executable.source) can't
+        // be specialized. Skip silently.
+        return;
       }
       ordinalSet.insert(ordinalAttr.getInt());
     }

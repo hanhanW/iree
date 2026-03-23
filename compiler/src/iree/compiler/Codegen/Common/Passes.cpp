@@ -6,10 +6,23 @@
 
 #include "iree/compiler/Codegen/Common/Passes.h"
 #include "iree/compiler/Codegen/Common/PassUtils.h"
+#include "iree/compiler/Dialect/HAL/Transforms/Passes.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Pass/PassManager.h"
 
 namespace mlir::iree_compiler {
+
+void buildCodegenConfigurationPreProcessingPassPipeline(
+    OpPassManager &variantPassManager) {
+  variantPassManager.addPass(createSpecializeExportsPass());
+  variantPassManager.addPass(createCreateDispatchConfigPass());
+}
+
+void buildCodegenTranslationPostProcessingPassPipeline(
+    OpPassManager &variantPassManager) {
+  variantPassManager.addPass(IREE::HAL::createHoistExecutableObjectsPass());
+  variantPassManager.addPass(createPropagateDispatchConfigPass());
+}
 
 void addCommonTargetExecutablePreprocessingPasses(
     FunctionLikeNest &funcPassManager, bool useDecomposeSoftmaxFusion) {
