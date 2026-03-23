@@ -162,7 +162,7 @@ public:
     RewritePatternSet patterns(&getContext());
     auto target = IREE::HAL::ExecutableTargetAttr::lookup(getOperation());
     if (!target) {
-      return signalPassFailure();
+      return;
     }
     populateMathFunctionsRewritePatterns(patterns, [target](StringRef name) {
       return predicateRewrite(name, target);
