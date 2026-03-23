@@ -7,6 +7,7 @@
 #include <cassert>
 #include "iree/compiler/Codegen/Common/PassUtils.h"
 #include "iree/compiler/Codegen/Dialect/Codegen/IR/IREECodegenAttrs.h"
+#include "iree/compiler/Codegen/Dialect/Codegen/IR/IREECodegenOps.h"
 #include "iree/compiler/Codegen/Dialect/GPU/IR/IREEGPUAttrs.h"
 #include "iree/compiler/Codegen/LLVMGPU/ROCDLPasses.h"
 #include "iree/compiler/Codegen/Utils/GPUUtils.h"
@@ -72,21 +73,21 @@ getChipsetVersion(MLIRContext *context,
 // architectures.
 static LogicalResult
 annotateKernelForTranslation(LLVM::LLVMFuncOp funcOp,
-                             IREE::HAL::ExecutableVariantOp variantOp,
-                             IREE::HAL::ExecutableExportOp exportOp) {
+                             IREE::Codegen::DispatchConfigOp configOp) {
   OpBuilder builder(funcOp);
   auto *rocdlDialect =
       funcOp.getContext()->getLoadedDialect<ROCDL::ROCDLDialect>();
   assert(rocdlDialect && "ROCDL dialect not loaded");
   UnitAttr unitAttr = builder.getUnitAttr();
   rocdlDialect->getKernelAttrHelper().setAttr(funcOp, unitAttr);
-  std::optional<ArrayAttr> workgroupSizeAttr = exportOp.getWorkgroupSize();
-  if (workgroupSizeAttr && workgroupSizeAttr->size() <= 3) {
+
+  // Read workgroup_size from dispatch_config.
+  std::optional<ArrayRef<int64_t>> wgSize = configOp.getWorkgroupSize();
+  if (wgSize && wgSize->size() <= 3) {
     std::array<int32_t, 3> wgSizes;
     int32_t flatWgSize = 1;
-    for (auto [value, attr] : llvm::zip_equal(
-             wgSizes, workgroupSizeAttr->getAsRange<IntegerAttr>())) {
-      value = attr.getInt();
+    for (auto [value, dim] : llvm::zip_equal(wgSizes, *wgSize)) {
+      value = static_cast<int32_t>(dim);
       flatWgSize *= value;
     }
     rocdlDialect->getReqdWorkGroupSizeAttrHelper().setAttr(
@@ -96,15 +97,18 @@ annotateKernelForTranslation(LLVM::LLVMFuncOp funcOp,
         builder.getStringAttr(Twine(flatWgSize) + "," + Twine(flatWgSize)));
   }
 
-  IREE::HAL::ExecutableTargetAttr targetAttr = variantOp.getTarget();
-  if (IntegerAttr attr =
-          getConfigWavesPerEuAttr(targetAttr.getConfiguration())) {
-    rocdlDialect->getWavesPerEuAttrHelper().setAttr(funcOp, attr);
-  }
-  if (IREE::Codegen::DenormalFpMathAttr attr =
-          getConfigDenormalFpMathF32Attr(targetAttr.getConfiguration());
-      attr && attr.getValue() != IREE::Codegen::DenormalFpMath::None) {
-    setDenormalFpenvForF32(funcOp, toLLVMDenormalModeKind(attr.getValue()));
+  IREE::HAL::ExecutableTargetAttr targetAttr =
+      IREE::HAL::ExecutableTargetAttr::lookup(funcOp);
+  if (targetAttr) {
+    if (IntegerAttr attr =
+            getConfigWavesPerEuAttr(targetAttr.getConfiguration())) {
+      rocdlDialect->getWavesPerEuAttrHelper().setAttr(funcOp, attr);
+    }
+    if (IREE::Codegen::DenormalFpMathAttr attr =
+            getConfigDenormalFpMathF32Attr(targetAttr.getConfiguration());
+        attr && attr.getValue() != IREE::Codegen::DenormalFpMath::None) {
+      setDenormalFpenvForF32(funcOp, toLLVMDenormalModeKind(attr.getValue()));
+    }
   }
 
   // Check if the `denormal_fp_math_f32` dictionary is set and process it.
@@ -125,10 +129,13 @@ annotateKernelForTranslation(LLVM::LLVMFuncOp funcOp,
   // Kernel argument preloading is only supported on gfx942 and newer targets
   // from the CDNA family. This is enabled using the `inreg` function argument
   // attribute.
+  if (!targetAttr) {
+    return success();
+  }
   FailureOr<amdgpu::Chipset> chipset =
       getChipsetVersion(builder.getContext(), targetAttr);
   if (failed(chipset)) {
-    return variantOp.emitError() << "failed to parse amdgpu chipset";
+    return funcOp.emitError() << "failed to parse amdgpu chipset";
   }
 
   if (chipset->majorVersion != 9 || *chipset < amdgpu::Chipset(9, 4, 0)) {
@@ -144,8 +151,6 @@ annotateKernelForTranslation(LLVM::LLVMFuncOp funcOp,
   return success();
 }
 
-/// Lowers an IREE hal.executable.variant operation using a suitable pass
-/// pipeline.
 struct ROCDLAnnotateKernelForTranslationPass final
     : impl::ROCDLAnnotateKernelForTranslationPassBase<
           ROCDLAnnotateKernelForTranslationPass> {
@@ -153,28 +158,25 @@ struct ROCDLAnnotateKernelForTranslationPass final
     LLVM::LLVMFuncOp funcOp = getOperation();
     StringRef funcName = funcOp.getName();
 
-    auto variantOp = funcOp->getParentOfType<IREE::HAL::ExecutableVariantOp>();
-    if (!variantOp) {
-      funcOp.emitError() << "cannot find parent hal.executable.variant op";
-      return signalPassFailure();
-    }
-
-    IREE::HAL::ExecutableExportOp exportOp;
-    // Try to find the matching executable export op.
-    for (IREE::HAL::ExecutableExportOp candidate : variantOp.getExportOps()) {
-      if (candidate.getSymName() == funcName) {
-        exportOp = candidate;
-        break;
+    // Find the matching dispatch_config op in the parent module.
+    IREE::Codegen::DispatchConfigOp configOp;
+    if (auto moduleOp = funcOp->getParentOfType<ModuleOp>()) {
+      for (auto candidate :
+           moduleOp.getOps<IREE::Codegen::DispatchConfigOp>()) {
+        if (candidate.getFunctionRef() == funcName) {
+          configOp = candidate;
+          break;
+        }
       }
     }
 
-    // Un-exported functions are library functions or otherwise not kernels, so
-    // don't need these annotations.
-    if (!exportOp) {
+    // Functions without a dispatch_config are library functions or otherwise
+    // not kernels, so don't need these annotations.
+    if (!configOp) {
       return;
     }
 
-    if (failed(annotateKernelForTranslation(funcOp, variantOp, exportOp))) {
+    if (failed(annotateKernelForTranslation(funcOp, configOp))) {
       return signalPassFailure();
     }
   }
