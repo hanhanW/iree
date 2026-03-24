@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "iree/compiler/Codegen/Dialect/Codegen/IR/IREECodegenOps.h"
 #include "iree/compiler/Dialect/HAL/IR/HALDialect.h"
 #include "iree/compiler/Dialect/Util/Conversion/ConversionPatterns.h"
 #include "iree/compiler/Dialect/Util/Conversion/MemRefToUtil/Patterns.h"
@@ -72,6 +73,9 @@ public:
     conversionTarget.addLegalDialect<mlir::affine::AffineDialect>();
     conversionTarget.addLegalDialect<memref::MemRefDialect>();
     conversionTarget.addIllegalOp<mlir::UnrealizedConversionCastOp>();
+    conversionTarget
+        .addLegalOp<IREE::Codegen::DispatchConfigOp, IREE::Codegen::YieldOp>();
+    conversionTarget.markOpRecursivelyLegal<IREE::Codegen::DispatchConfigOp>();
 
     RewritePatternSet patterns(&getContext());
     populateHALToVMVXPatterns(context, conversionTarget, patterns,
