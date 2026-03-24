@@ -151,6 +151,8 @@ annotateKernelForTranslation(LLVM::LLVMFuncOp funcOp,
   return success();
 }
 
+/// Lowers an IREE hal.executable.variant operation using a suitable pass
+/// pipeline.
 struct ROCDLAnnotateKernelForTranslationPass final
     : impl::ROCDLAnnotateKernelForTranslationPassBase<
           ROCDLAnnotateKernelForTranslationPass> {

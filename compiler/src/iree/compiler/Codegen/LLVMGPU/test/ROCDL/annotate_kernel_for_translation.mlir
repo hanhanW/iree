@@ -23,12 +23,12 @@ builtin.module {
         hal.return %c128, %c2, %c1 : index, index, index
       }
       builtin.module {
-        llvm.func @test() {
-          llvm.return
-        }
         iree_codegen.dispatch_config @test workgroup_size = [128, 2, 1] subgroup_size = 64 {
           %c1 = arith.constant 1 : index
           iree_codegen.yield %c1, %c1, %c1 : index, index, index
+        }
+        llvm.func @test() {
+          llvm.return
         }
         llvm.func @test_not_exported() {
           llvm.return
@@ -71,12 +71,12 @@ builtin.module {
         hal.return %c128, %c2, %c1 : index, index, index
       }
       builtin.module {
-        llvm.func @test_kern_arg(%arg0: i32) {
-          llvm.return
-        }
         iree_codegen.dispatch_config @test_kern_arg workgroup_size = [128, 2, 1] subgroup_size = 64 {
           %c1 = arith.constant 1 : index
           iree_codegen.yield %c1, %c1, %c1 : index, index, index
+        }
+        llvm.func @test_kern_arg(%arg0: i32) {
+          llvm.return
         }
       }
     }
@@ -112,12 +112,12 @@ builtin.module {
         hal.return %c128, %c2, %c1 : index, index, index
       }
       builtin.module {
-        llvm.func @test_no_kern_arg(%arg0: i32) {
-          llvm.return
-        }
         iree_codegen.dispatch_config @test_no_kern_arg workgroup_size = [128, 2, 1] subgroup_size = 64 {
           %c1 = arith.constant 1 : index
           iree_codegen.yield %c1, %c1, %c1 : index, index, index
+        }
+        llvm.func @test_no_kern_arg(%arg0: i32) {
+          llvm.return
         }
       }
     }
@@ -153,14 +153,14 @@ builtin.module {
         hal.return %c1, %c1, %c1 : index, index, index
       }
       builtin.module {
+        iree_codegen.dispatch_config @test_rocdl_attrs workgroup_size = [128, 2, 1] subgroup_size = 64 {
+          %c1 = arith.constant 1 : index
+          iree_codegen.yield %c1, %c1, %c1 : index, index, index
+        }
         // CHECK-LABEL: llvm.func @test_rocdl_attrs
         // CHECK: denormal_fpenv = #llvm.denormal_fpenv<default_output_mode = ieee, default_input_mode = ieee, float_output_mode = preservesign, float_input_mode = preservesign>
         llvm.func @test_rocdl_attrs(%arg0: i32) {
           llvm.return
-        }
-        iree_codegen.dispatch_config @test_rocdl_attrs workgroup_size = [128, 2, 1] subgroup_size = 64 {
-          %c1 = arith.constant 1 : index
-          iree_codegen.yield %c1, %c1, %c1 : index, index, index
         }
       }
     }
@@ -193,14 +193,14 @@ builtin.module {
         hal.return %c1, %c1, %c1 : index, index, index
       }
       builtin.module {
+        iree_codegen.dispatch_config @test_rocdl_attrs workgroup_size = [128, 2, 1] subgroup_size = 64 {
+          %c1 = arith.constant 1 : index
+          iree_codegen.yield %c1, %c1, %c1 : index, index, index
+        }
         // CHECK-LABEL: llvm.func @test_rocdl_attrs
         // CHECK: denormal_fpenv = #llvm.denormal_fpenv<default_output_mode = ieee, default_input_mode = ieee, float_output_mode = positivezero, float_input_mode = positivezero>
         llvm.func @test_rocdl_attrs(%arg0: i32) {
           llvm.return
-        }
-        iree_codegen.dispatch_config @test_rocdl_attrs workgroup_size = [128, 2, 1] subgroup_size = 64 {
-          %c1 = arith.constant 1 : index
-          iree_codegen.yield %c1, %c1, %c1 : index, index, index
         }
       }
     }
@@ -233,15 +233,15 @@ builtin.module {
         hal.return %c128, %c2, %c1 : index, index, index
       }
       builtin.module {
+        iree_codegen.dispatch_config @test_kern_arg workgroup_size = [128, 2, 1] subgroup_size = 64 {
+          %c1 = arith.constant 1 : index
+          iree_codegen.yield %c1, %c1, %c1 : index, index, index
+        }
         llvm.func @test_kern_arg(%arg0: i32) attributes {
             iree_codegen.denormal_fp_math_f32 = #iree_codegen.denormal_fp_math<"preserve-sign">,
             llvm_func_attrs = {check_attr}
           } {
           llvm.return
-        }
-        iree_codegen.dispatch_config @test_kern_arg workgroup_size = [128, 2, 1] subgroup_size = 64 {
-          %c1 = arith.constant 1 : index
-          iree_codegen.yield %c1, %c1, %c1 : index, index, index
         }
       }
     }
@@ -280,15 +280,15 @@ builtin.module {
         hal.return %c128, %c2, %c1 : index, index, index
       }
       builtin.module {
+        iree_codegen.dispatch_config @test_kern_arg workgroup_size = [128, 2, 1] subgroup_size = 64 {
+          %c1 = arith.constant 1 : index
+          iree_codegen.yield %c1, %c1, %c1 : index, index, index
+        }
         llvm.func @test_kern_arg(%arg0: i32) attributes {
             iree_codegen.denormal_fp_math_f32 = #iree_codegen.denormal_fp_math<none>,
             llvm_func_attrs = {check_attr}
           } {
           llvm.return
-        }
-        iree_codegen.dispatch_config @test_kern_arg workgroup_size = [128, 2, 1] subgroup_size = 64 {
-          %c1 = arith.constant 1 : index
-          iree_codegen.yield %c1, %c1, %c1 : index, index, index
         }
       }
     }

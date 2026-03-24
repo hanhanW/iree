@@ -18,9 +18,13 @@ void buildCodegenConfigurationPreProcessingPassPipeline(
   variantPassManager.addPass(createCreateDispatchConfigPass());
 }
 
-void buildCodegenTranslationPostProcessingPassPipeline(
+void buildCodegenTranslationPreProcessingPassPipeline(
     OpPassManager &variantPassManager) {
   variantPassManager.addPass(IREE::HAL::createHoistExecutableObjectsPass());
+}
+
+void buildCodegenTranslationPostProcessingPassPipeline(
+    OpPassManager &variantPassManager) {
   variantPassManager.addPass(createPropagateDispatchConfigPass());
 }
 

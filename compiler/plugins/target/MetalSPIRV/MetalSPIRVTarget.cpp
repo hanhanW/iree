@@ -117,6 +117,7 @@ public:
 
   void buildTranslationPassPipeline(IREE::HAL::ExecutableTargetAttr targetAttr,
                                     OpPassManager &passManager) final {
+    buildCodegenTranslationPreProcessingPassPipeline(passManager);
     buildSPIRVCodegenPassPipeline(passManager.nest<ModuleOp>());
     buildCodegenTranslationPostProcessingPassPipeline(passManager);
   }

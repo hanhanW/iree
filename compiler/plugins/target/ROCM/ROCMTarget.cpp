@@ -536,6 +536,7 @@ public:
 
   void buildTranslationPassPipeline(IREE::HAL::ExecutableTargetAttr targetAttr,
                                     OpPassManager &passManager) final {
+    buildCodegenTranslationPreProcessingPassPipeline(passManager);
     buildLLVMGPUCodegenPassPipeline(passManager.nest<ModuleOp>(), true,
                                     targetOptions.debugSymbols);
     buildCodegenTranslationPostProcessingPassPipeline(passManager);

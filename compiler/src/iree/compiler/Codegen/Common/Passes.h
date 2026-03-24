@@ -41,8 +41,13 @@ void addCommonTargetExecutablePreprocessingPasses(
 void buildCodegenConfigurationPreProcessingPassPipeline(
     OpPassManager &variantPassManager);
 
+/// Variant-scoped pre-processing passes run before the translation pipeline.
+/// Includes hoist-executable-objects.
+void buildCodegenTranslationPreProcessingPassPipeline(
+    OpPassManager &variantPassManager);
+
 /// Variant-scoped post-processing passes run after the translation pipeline.
-/// Includes hoist-executable-objects and propagate-dispatch-config.
+/// Includes propagate-dispatch-config.
 void buildCodegenTranslationPostProcessingPassPipeline(
     OpPassManager &variantPassManager);
 
