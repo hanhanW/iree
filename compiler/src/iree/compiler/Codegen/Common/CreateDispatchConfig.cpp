@@ -33,12 +33,23 @@ void CreateDispatchConfigPass::runOnOperation() {
   // Build a map from symbol name to func op for placement.
   SymbolTable symbolTable(innerModule);
 
+  // Build a set of existing dispatch_config function refs to avoid duplicates.
+  DenseSet<StringRef> existingConfigs;
+  for (auto configOp : innerModule.getOps<IREE::Codegen::DispatchConfigOp>()) {
+    existingConfigs.insert(configOp.getFunctionRef());
+  }
+
   OpBuilder builder(&getContext());
   for (auto exportOp : variantOp.getExportOps()) {
     // Find the corresponding function.
     auto funcOp =
         symbolTable.lookup<FunctionOpInterface>(exportOp.getSymNameAttr());
     if (!funcOp) {
+      continue;
+    }
+
+    // Skip if a dispatch_config already exists for this function.
+    if (existingConfigs.contains(funcOp.getName())) {
       continue;
     }
 
