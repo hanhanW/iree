@@ -14,8 +14,11 @@
 #define IREE_COMPILER_TOOLS_INIT_LLVMIR_TRANSLATIONS_H_
 
 #include "mlir/Target/LLVMIR/Dialect/ArmNeon/ArmNeonToLLVMIRTranslation.h"
+#include "mlir/Target/LLVMIR/Dialect/ArmSME/ArmSMEToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/Builtin/BuiltinToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
+#include "mlir/Target/LLVMIR/Dialect/NVVM/NVVMToLLVMIRTranslation.h"
+#include "mlir/Target/LLVMIR/Dialect/ROCDL/ROCDLToLLVMIRTranslation.h"
 
 namespace mlir::iree_compiler {
 
@@ -23,6 +26,9 @@ inline void registerLLVMIRTranslations(DialectRegistry &registry) {
   mlir::registerBuiltinDialectTranslation(registry);
   mlir::registerLLVMDialectTranslation(registry);
   mlir::registerArmNeonDialectTranslation(registry);
+  mlir::registerArmSMEDialectTranslation(registry);
+  mlir::registerNVVMDialectTranslation(registry);
+  mlir::registerROCDLDialectTranslation(registry);
 }
 
 } // namespace mlir::iree_compiler

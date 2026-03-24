@@ -96,6 +96,43 @@ def ConvertConstraintsToSMTPass : Pass<"iree-codegen-convert-constraints-to-smt"
   let dependentDialects = ["mlir::smt::SMTDialect"];
 }
 
+def ConvertFuncToHALExecutablePass
+    : Pass<"iree-codegen-convert-func-to-hal-executable", "mlir::ModuleOp"> {
+  let summary = "Converts a func.func into a hal.executable for device codegen";
+  let description = [{
+    Converts a user-provided func.func (with tensor args, index args, and
+    iree.abi.output attributes) into the hal.executable structure that IREE's
+    device codegen pipeline expects.
+
+    The input func.func follows a strict argument ordering convention:
+    - Arguments come in groups: tensor, then its pending dynamic dim index args.
+    - Scalars (non-tensor, non-index) have no pending args.
+    - Output tensors appear last, marked with {iree.abi.output = N}.
+    - Each output tensor is followed by its dynamic dim index args.
+    - The return type corresponds to the output tensor.
+
+    The output is a hal.executable containing:
+    - hal.executable.variant with the specified target
+    - hal.executable.export with workgroup count region
+    - builtin.module with the converted func.func using HAL interface ops
+  }];
+  let options = [
+    Option<"targetBackend", "target-backend", "std::string",
+           /*default=*/"\"rocm\"",
+           "Target backend (e.g., \"rocm\", \"cuda\")">,
+    Option<"targetFormat", "target-format", "std::string",
+           /*default=*/"\"rocm-hsaco-fb\"",
+           "Target format (e.g., \"rocm-hsaco-fb\", \"cuda-nvptx-fb\")">,
+  ];
+  let dependentDialects = [
+    "mlir::arith::ArithDialect",
+    "mlir::tensor::TensorDialect",
+    "mlir::linalg::LinalgDialect",
+    "IREE::HAL::HALDialect",
+    "IREE::TensorExt::IREETensorExtDialect",
+  ];
+}
+
 def ConvertUnsupportedFloatToIntBuffersPass :
     Pass<"iree-codegen-convert-unsupported-float-to-int-buffers", ""> {
   let summary = "Convert unsupported float buffer types to integer types of same bit width.";
@@ -509,6 +546,36 @@ def ConvertHALDescriptorTypeToGPUAddressSpacePass
 }
 
 
+
+def ExtractWorkgroupCountAsFuncPass
+    : Pass<"iree-codegen-extract-workgroup-count-as-func", "mlir::ModuleOp"> {
+  let summary = "Extracts workgroup count regions as standalone func.func ops";
+  let description = [{
+    Walks hal.executable.export ops and extracts each workgroup count region
+    into a standalone func.func placed at the module level. The !hal.device
+    argument is dropped and hal.return is replaced with func.return.
+
+    This produces a host-callable function that computes grid dimensions
+    from workload values (dynamic dimensions passed as push constants).
+
+    Input (count region inside hal.executable.export):
+      count(%device: !hal.device, %arg0: index, ...) -> (index, index, index) {
+        %0 = affine.apply #map()[%arg0]
+        %c1 = arith.constant 1 : index
+        hal.return %0, %c1, %c1 : index, index, index
+      }
+
+    Output (new func at module level):
+      func.func @<name>_workgroup_count(%arg0: index, ...) -> (index, index, index) {
+        %0 = affine.apply #map()[%arg0]
+        %c1 = arith.constant 1 : index
+        return %0, %c1, %c1 : index, index, index
+      }
+  }];
+  let dependentDialects = [
+    "mlir::func::FuncDialect",
+  ];
+}
 
 def FissionTransferOpsInControlFlowPass : InterfacePass<"iree-codegen-fission-transfer-ops-in-control-flow", "mlir::FunctionOpInterface"> {
   let summary =
