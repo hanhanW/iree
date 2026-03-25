@@ -40,6 +40,9 @@ IREE_EMBED_EXPORTED int ireeLinkRunMain(int argc, char **argv);
 /// Runs the IREE reducer main function.
 IREE_EMBED_EXPORTED int ireeReduceRunMain(int argc, char **argv);
 
+/// Runs the iree-device-codegen main function.
+IREE_EMBED_EXPORTED int ireeDeviceCodegenRunMain(int argc, char **argv);
+
 #ifdef __cplusplus
 }
 #endif

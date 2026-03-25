@@ -127,6 +127,7 @@ EXPORTS
   ireeGPUVirtualMMAIntrinsicAttrGetTypeID
   ireeGPUVirtualMMAIntrinsicAttrGetValue
   ireeHALExecutableTargetAttrGetGPUTargetInfo
+  ireeDeviceCodegenRunMain
   ireeLinkRunMain
   ireeMlirLspServerRunMain
   ireeOptRunMain

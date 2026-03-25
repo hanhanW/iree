@@ -33,6 +33,7 @@ iree_cc_library(
     iree::compiler::API::Internal::CompilerDriver
     iree::compiler::API::Internal::IREECodegenDialectCAPI
     iree::compiler::API::Internal::IREECompileToolEntryPoint
+    iree::compiler::API::Internal::IREEDeviceCodegenEntryPoint
     iree::compiler::API::Internal::IREEGPUDialectCAPI
     iree::compiler::API::Internal::IREELinkToolEntryPoint
     iree::compiler::API::Internal::IREEMLIRLSPServerToolEntryPoint
@@ -76,6 +77,7 @@ set(_EXPORT_OBJECT_LIBS
   iree_compiler_API_Internal_CompilerDriver.objects
   iree_compiler_API_Internal_IREECodegenDialectCAPI.objects
   iree_compiler_API_Internal_IREECompileToolEntryPoint.objects
+  iree_compiler_API_Internal_IREEDeviceCodegenEntryPoint.objects
   iree_compiler_API_Internal_IREEGPUDialectCAPI.objects
   iree_compiler_API_Internal_IREELinkToolEntryPoint.objects
   iree_compiler_API_Internal_IREEMLIRLSPServerToolEntryPoint.objects

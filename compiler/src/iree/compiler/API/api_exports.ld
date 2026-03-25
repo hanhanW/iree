@@ -128,6 +128,7 @@ VER_0 {
     ireeGPUVirtualMMAIntrinsicAttrGetTypeID;
     ireeGPUVirtualMMAIntrinsicAttrGetValue;
     ireeHALExecutableTargetAttrGetGPUTargetInfo;
+    ireeDeviceCodegenRunMain;
     ireeLinkRunMain;
     ireeMlirLspServerRunMain;
     ireeOptRunMain;

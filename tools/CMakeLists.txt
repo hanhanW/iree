@@ -433,6 +433,31 @@ if(IREE_BUILD_COMPILER)
 
   iree_cc_binary(
     NAME
+      iree-device-codegen
+    SRCS
+      "iree-device-codegen.cc"
+    DEPS
+      iree::compiler::bindings::c::headers
+      iree::compiler::API::Impl
+    DATA
+      ${IREE_LLD_TARGET}
+    HOSTONLY
+    SETUP_INSTALL_RPATH
+  )
+
+  # run-hip-kernel: standalone HIP kernel launcher (no IREE dependencies).
+  # Only built when HIP SDK is available.
+  find_package(hip QUIET)
+  if(hip_FOUND)
+    add_executable(run-hip-kernel "${CMAKE_CURRENT_SOURCE_DIR}/run-hip-kernel.cpp")
+    target_link_libraries(run-hip-kernel PRIVATE hip::host dl)
+    set_target_properties(run-hip-kernel PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/tools"
+    )
+  endif()
+
+  iree_cc_binary(
+    NAME
       iree-mlir-lsp-server
     SRCS
       "iree-mlir-lsp-server.cc"

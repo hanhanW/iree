@@ -137,6 +137,7 @@ extern void ireeGPUVirtualMMAIntrinsicAttrGet();
 extern void ireeGPUVirtualMMAIntrinsicAttrGetTypeID();
 extern void ireeGPUVirtualMMAIntrinsicAttrGetValue();
 extern void ireeHALExecutableTargetAttrGetGPUTargetInfo();
+extern void ireeDeviceCodegenRunMain();
 extern void ireeLinkRunMain();
 extern void ireeMlirLspServerRunMain();
 extern void ireeOptRunMain();
@@ -1295,6 +1296,7 @@ uintptr_t __iree_compiler_hidden_force_extern() {
   x += (uintptr_t)&ireeGPUVirtualMMAIntrinsicAttrGetTypeID;
   x += (uintptr_t)&ireeGPUVirtualMMAIntrinsicAttrGetValue;
   x += (uintptr_t)&ireeHALExecutableTargetAttrGetGPUTargetInfo;
+  x += (uintptr_t)&ireeDeviceCodegenRunMain;
   x += (uintptr_t)&ireeLinkRunMain;
   x += (uintptr_t)&ireeMlirLspServerRunMain;
   x += (uintptr_t)&ireeOptRunMain;
