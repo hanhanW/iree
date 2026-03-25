@@ -158,7 +158,7 @@ def run_test(test_meta, work_dir, runner_bin, input_paths):
     rc, out, err = run_cmd(cmd)
     output = out + err
     if "PASS" in output:
-        m_err = re.search(r"Max relative error: ([0-9.e+-]+)", output)
+        m_err = re.search(r"max rel error: ([0-9.e+-]+)", output)
         max_err = m_err.group(1) if m_err else "?"
         return 0, f"PASS (max rel err: {max_err})"
     elif rc != 0:
