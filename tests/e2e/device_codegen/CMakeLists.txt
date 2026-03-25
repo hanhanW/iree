@@ -29,6 +29,7 @@ iree_lit_test_suite(
   SRCS
     "matmul_bias.mlir"
     "matmul_bias_dynamic.mlir"
+    "matmul_bias_fully_dynamic.mlir"
   TOOLS
     iree-compile
     iree-device-codegen
