@@ -4,23 +4,21 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
-// Entry point for iree-device-codegen. Lives inside the compiler shared
-// library so it has access to all internal APIs (pass constructors, dialect
-// registrations, plugin infrastructure).
+// Entry point for iree-device-codegen. Uses the IREE C API for
+// initialization, CL parsing, and source parsing. Builds the device codegen
+// pipeline programmatically with the session's target registry. Artifact
+// extraction (workgroup_count .so, kernel binary, metadata.json) uses
+// internal C++ APIs.
 
 #include "iree/compiler/Codegen/Common/Passes.h"
-#include "iree/compiler/Codegen/LLVMGPU/Passes.h"
-#include "iree/compiler/Dialect/HAL/IR/HALDialect.h"
 #include "iree/compiler/Dialect/HAL/IR/HALOps.h"
+#include "iree/compiler/Dialect/HAL/Target/TargetBackend.h"
+#include "iree/compiler/Dialect/HAL/Target/TargetOptions.h"
 #include "iree/compiler/Dialect/HAL/Target/TargetRegistry.h"
 #include "iree/compiler/Dialect/HAL/Transforms/Passes.h"
-#include "iree/compiler/Dialect/VM/Target/init_targets.h"
-#include "iree/compiler/Pipelines/Options.h"
-#include "iree/compiler/PluginAPI/PluginManager.h"
-#include "iree/compiler/Tools/init_dialects.h"
-#include "iree/compiler/Tools/init_llvmir_translations.h"
-#include "iree/compiler/Tools/init_passes.h"
 #include "iree/compiler/Utils/ToolUtils.h"
+#include "iree/compiler/embedding_api.h"
+#include "iree/compiler/mlir_interop.h"
 #include "iree/compiler/tool_entry_points_api.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
@@ -29,22 +27,17 @@
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
-#include "llvm/Support/InitLLVM.h"
-#include "llvm/Support/Process.h"
-#include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Target/TargetMachine.h"
-#include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
+#include "mlir/CAPI/IR.h"
 #include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"
 #include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVMPass.h"
 #include "mlir/Conversion/IndexToLLVM/IndexToLLVM.h"
 #include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/IR/AsmState.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
-#include "mlir/Parser/Parser.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/FileUtilities.h"
@@ -72,8 +65,7 @@ static void createCABIWrapper(llvm::Module &M, llvm::Function *origFunc) {
   origFunc->setName(wrapperName + "_impl");
   origFunc->setLinkage(llvm::GlobalValue::InternalLinkage);
 
-  auto *wrapperTy =
-      llvm::FunctionType::get(voidTy, {ptrTy, ptrTy}, false);
+  auto *wrapperTy = llvm::FunctionType::get(voidTy, {ptrTy, ptrTy}, false);
   auto *wrapper = llvm::Function::Create(
       wrapperTy, llvm::GlobalValue::ExternalLinkage, wrapperName, &M);
   wrapper->setDSOLocal(true);
@@ -105,8 +97,7 @@ static void createCABIWrapper(llvm::Module &M, llvm::Function *origFunc) {
   builder.CreateRetVoid();
 }
 
-static int compileWorkgroupCountToSO(ModuleOp module,
-                                      StringRef outputDir) {
+static int compileWorkgroupCountToSO(ModuleOp module, StringRef outputDir) {
   SmallVector<func::FuncOp> wgCountFuncs;
   module.walk([&](func::FuncOp funcOp) {
     if (funcOp.getName().ends_with("_workgroup_count")) {
@@ -150,8 +141,8 @@ static int compileWorkgroupCountToSO(ModuleOp module,
   ctx->appendDialectRegistry(translationRegistry);
 
   llvm::LLVMContext llvmContext;
-  auto llvmModule = translateModuleToLLVMIR(wgModule.getOperation(),
-                                             llvmContext, "wg_count");
+  auto llvmModule =
+      translateModuleToLLVMIR(wgModule.getOperation(), llvmContext, "wg_count");
   if (!llvmModule) {
     llvm::errs() << "Error: failed to translate workgroup_count to LLVM IR\n";
     return 1;
@@ -160,8 +151,7 @@ static int compileWorkgroupCountToSO(ModuleOp module,
   // Create C-ABI wrappers.
   SmallVector<llvm::Function *> origFuncs;
   for (auto &func : *llvmModule) {
-    if (!func.isDeclaration() &&
-        func.getName().ends_with("_workgroup_count")) {
+    if (!func.isDeclaration() && func.getName().ends_with("_workgroup_count")) {
       origFuncs.push_back(&func);
     }
   }
@@ -183,8 +173,7 @@ static int compileWorkgroupCountToSO(ModuleOp module,
   }
 
   std::unique_ptr<llvm::TargetMachine> targetMachine(
-      target->createTargetMachine(triple, "generic", "",
-                                  llvm::TargetOptions(),
+      target->createTargetMachine(triple, "generic", "", llvm::TargetOptions(),
                                   llvm::Reloc::PIC_));
   if (!targetMachine) {
     llvm::errs() << "Error: failed to create host target machine\n";
@@ -240,22 +229,37 @@ static int compileWorkgroupCountToSO(ModuleOp module,
 }
 
 //===----------------------------------------------------------------------===//
-// Metadata + HSACO extraction
+// Metadata + kernel binary extraction
 //===----------------------------------------------------------------------===//
 
-static int writeArtifacts(ModuleOp module, StringRef outputDir) {
+// Returns the kernel binary filename for the given backend.
+static StringRef getKernelFilename(StringRef backendName) {
+  if (backendName == "rocm") {
+    return "kernel.hsaco";
+  }
+  if (backendName == "llvm-cpu") {
+    return "kernel.elf";
+  }
+  if (backendName == "vulkan-spirv") {
+    return "kernel.spv";
+  }
+  return "kernel.bin";
+}
+
+static int writeArtifacts(ModuleOp module, StringRef outputDir,
+                          StringRef backendName) {
   std::string kernelName;
   module.walk([&](HAL::ExecutableOp execOp) {
     kernelName = execOp.getSymName().str();
   });
 
-  // Extract HSACO.
+  // Extract kernel binary.
   module.walk([&](HAL::ExecutableBinaryOp binaryOp) {
     auto dataAttr = dyn_cast<DenseIntElementsAttr>(binaryOp.getData());
     if (!dataAttr) {
       return;
     }
-    std::string path = (outputDir + "/kernel.hsaco").str();
+    std::string path = (outputDir + "/" + getKernelFilename(backendName)).str();
     FILE *f = fopen(path.c_str(), "wb");
     if (!f) {
       return;
@@ -300,6 +304,9 @@ static int writeArtifacts(ModuleOp module, StringRef outputDir) {
   }
   fprintf(mf, "{\n");
   fprintf(mf, "  \"kernel_name\": \"%s\"", kernelName.c_str());
+  fprintf(mf, ",\n  \"backend\": \"%s\"", backendName.str().c_str());
+  fprintf(mf, ",\n  \"kernel_file\": \"%s\"",
+          getKernelFilename(backendName).str().c_str());
   if (!wgSizeStr.empty()) {
     fprintf(mf, ",\n  \"workgroup_size\": %s", wgSizeStr.c_str());
   }
@@ -317,174 +324,242 @@ static int writeArtifacts(ModuleOp module, StringRef outputDir) {
 //===----------------------------------------------------------------------===//
 
 int ireeDeviceCodegenRunMain(int argc, char **argv) {
-  llvm::setBugReportMsg(
-      "Please report issues to https://github.com/iree-org/iree/issues and "
-      "include the crash backtrace.\n");
-
   // --- CL options ---
   static llvm::cl::opt<std::string> inputFilename(
       llvm::cl::Positional, llvm::cl::desc("<input file>"),
       llvm::cl::init("-"));
   static llvm::cl::opt<std::string> outputFilename(
-      "o", llvm::cl::desc("Output filename"),
-      llvm::cl::value_desc("filename"), llvm::cl::init("-"));
+      "o", llvm::cl::desc("Output filename"), llvm::cl::value_desc("filename"),
+      llvm::cl::init("-"));
   static llvm::cl::opt<std::string> outputDir(
       "output-dir",
-      llvm::cl::desc("Extract artifacts (kernel.hsaco, metadata.json, "
-                      "workgroup_count.so) to directory"));
+      llvm::cl::desc("Extract artifacts (kernel binary, metadata.json, "
+                     "workgroup_count.so) to directory"));
   static llvm::cl::opt<bool> noSerialize(
       "no-serialize",
-      llvm::cl::desc("Skip HSACO serialization (codegen-only inspection)"),
+      llvm::cl::desc("Skip serialization (codegen-only inspection)"),
       llvm::cl::init(false));
 
-  // --- IREE initialization ---
-  DialectRegistry registry;
-  iree_compiler::registerAllDialects(registry);
-  iree_compiler::registerAllPasses();
-  iree_compiler::registerVMTargets();
-  iree_compiler::registerLLVMIRTranslations(registry);
-
-  // Plugin setup.
-  iree_compiler::PluginManager pluginManager;
-  if (!pluginManager.loadAvailablePlugins()) {
-    llvm::errs() << "Error: failed to initialize IREE compiler plugins\n";
-    return 1;
-  }
-  pluginManager.globalInitialize();
-  pluginManager.registerPasses();
-  pluginManager.registerGlobalDialects(registry);
-  pluginManager.initializeCLI();
-
-  // Register standard CL options.
-  registerAsmPrinterCLOptions();
-  registerMLIRContextCLOptions();
-  registerPassManagerCLOptions();
-  iree_compiler::GlobalPipelineOptions::FromFlags::get();
-
-  // Inject --iree-rocm-container-type=hsaco so serialization emits raw
-  // HSACO ELF (not the default HIP FlatBuffer container).
+  // Inject backend-specific serialization flags.
+  // For ROCM: force raw HSACO ELF output (not the default FlatBuffer).
+  // We scan argv before parsing to determine whether ROCM is the target.
   SmallVector<const char *> augArgv(argv, argv + argc);
-  bool hasContainerType = false;
-  for (int i = 1; i < argc; ++i) {
-    if (strncmp(argv[i], "--iree-rocm-container-type", 26) == 0) {
-      hasContainerType = true;
+  {
+    bool hasContainerType = false;
+    bool isNonROCMBackend = false;
+    for (int i = 1; i < argc; ++i) {
+      if (strncmp(argv[i], "--iree-rocm-container-type", 26) == 0) {
+        hasContainerType = true;
+      }
+      // If the user explicitly sets a non-ROCM backend, don't inject
+      // the ROCM container type flag.
+      if (strncmp(argv[i], "--iree-hal-target-backends=", 27) == 0 &&
+          strstr(argv[i], "rocm") == nullptr) {
+        isNonROCMBackend = true;
+      }
     }
-  }
-  if (!hasContainerType && !noSerialize) {
-    augArgv.push_back("--iree-rocm-container-type=hsaco");
+    if (!hasContainerType && !noSerialize && !isNonROCMBackend) {
+      augArgv.push_back("--iree-rocm-container-type=hsaco");
+    }
   }
   int augArgc = augArgv.size();
   const char **augArgvPtr = augArgv.data();
 
-  // Parse.
-  llvm::InitLLVM y(augArgc, augArgvPtr);
-  llvm::cl::ParseCommandLineOptions(
-      augArgc, augArgvPtr, "IREE device-only code generation tool\n");
+  // --- IREE C API initialization ---
+  ireeCompilerGlobalInitialize();
+  ireeCompilerSetupGlobalCL(augArgc, augArgvPtr,
+                            "IREE device-only code generation tool\n",
+                            /*installSignalHandlers=*/true);
 
-  // Apply optimization defaults.
+  // --- Session, invocation, and source parsing ---
+  auto *session = ireeCompilerSessionCreate();
+  auto *inv = ireeCompilerInvocationCreate(session);
+  ireeCompilerInvocationEnableConsoleDiagnostics(inv);
+
+  iree_compiler_source_t *source = nullptr;
+  auto *err =
+      ireeCompilerSourceOpenFile(session, inputFilename.c_str(), &source);
+  if (err) {
+    llvm::errs() << "Error: " << ireeCompilerErrorGetMessage(err) << "\n";
+    ireeCompilerErrorDestroy(err);
+    ireeCompilerInvocationDestroy(inv);
+    ireeCompilerSessionDestroy(session);
+    ireeCompilerGlobalShutdown();
+    return 1;
+  }
+
+  if (!ireeCompilerInvocationParseSource(inv, source)) {
+    ireeCompilerSourceDestroy(source);
+    ireeCompilerInvocationDestroy(inv);
+    ireeCompilerSessionDestroy(session);
+    ireeCompilerGlobalShutdown();
+    return 1;
+  }
+  ireeCompilerSourceDestroy(source);
+
+  // --- Get session's target registry ---
+  auto *registry = reinterpret_cast<const HAL::TargetRegistry *>(
+      ireeCompilerSessionGetTargetRegistry(session));
+
+  // --- Determine target backend ---
+  // Priority: --iree-hal-target-backends > --iree-hal-target-device > default.
+  std::string targetBackendName;
   {
-    auto globalBinder = iree_compiler::OptionsBinder::global();
-    globalBinder.applyOptimizationDefaults();
+    auto &targetOpts = HAL::TargetOptions::FromFlags::get();
+    if (!targetOpts.legacyTargetBackends.empty()) {
+      targetBackendName = targetOpts.legacyTargetBackends.front();
+    } else if (!targetOpts.targetDevices.empty()) {
+      // Map device name to backend name via the TargetBackend registry.
+      // E.g., "hip" device -> "rocm" backend, "local" -> "llvm-cpu".
+      StringRef deviceName = targetOpts.targetDevices.front();
+      bool found = false;
+      for (const auto &backendName : registry->getRegisteredTargetBackends()) {
+        auto backend = registry->getTargetBackend(backendName);
+        if (backend && backend->getLegacyDefaultDeviceID() == deviceName) {
+          targetBackendName = backendName;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        llvm::errs() << "Error: no backend found for device '" << deviceName
+                     << "'\n";
+        ireeCompilerInvocationDestroy(inv);
+        ireeCompilerSessionDestroy(session);
+        ireeCompilerGlobalShutdown();
+        return 1;
+      }
+    } else {
+      targetBackendName = "rocm";
+    }
   }
 
-  // Plugin session — registers target backends.
-  auto localBinder = iree_compiler::OptionsBinder::local();
-  auto &pluginManagerOptions =
-      iree_compiler::PluginManagerOptions::FromFlags::get();
-  iree_compiler::PluginManagerSession pluginSession(
-      pluginManager, localBinder, pluginManagerOptions);
-  if (failed(pluginSession.initializePlugins())) {
-    llvm::errs() << "Error: failed to initialize plugins\n";
-    return 1;
-  }
-  pluginSession.registerDialects(registry);
+  // --- Steal module from invocation ---
+  MlirOperation mlirOp = ireeCompilerInvocationExportStealModule(inv);
+  auto moduleOp = cast<ModuleOp>(unwrap(mlirOp));
+  MLIRContext *ctx = moduleOp.getContext();
+  ctx->loadAllAvailableDialects();
 
-  HAL::TargetDeviceList targetDeviceList;
-  pluginSession.populateHALTargetDevices(targetDeviceList);
-  const_cast<HAL::TargetRegistry &>(HAL::TargetRegistry::getGlobal())
-      .mergeFrom(targetDeviceList);
-  HAL::TargetBackendList targetBackendList;
-  pluginSession.populateHALTargetBackends(targetBackendList);
-  const_cast<HAL::TargetRegistry &>(HAL::TargetRegistry::getGlobal())
-      .mergeFrom(targetBackendList);
-
-  // --- Create context and parse input ---
-  MLIRContext context(registry);
-  context.loadAllAvailableDialects();
-
-  std::string errorMessage;
-  auto inputFile = openInputFile(inputFilename, &errorMessage);
-  if (!inputFile) {
-    llvm::errs() << errorMessage << "\n";
-    return 1;
-  }
-  auto sourceMgr = std::make_shared<llvm::SourceMgr>();
-  sourceMgr->AddNewSourceBuffer(std::move(inputFile), llvm::SMLoc());
-
-  ParserConfig parserConfig(&context);
-  OwningOpRef<ModuleOp> moduleRef =
-      parseSourceFile<ModuleOp>(*sourceMgr, parserConfig);
-  if (!moduleRef) {
-    llvm::errs() << "Error: failed to parse input\n";
-    return 1;
+  // --- Construct ExecutableTargetAttr and attach to module ---
+  {
+    auto backend = registry->getTargetBackend(targetBackendName);
+    if (!backend) {
+      llvm::errs() << "Error: unknown target backend '" << targetBackendName
+                   << "'\n";
+      moduleOp->erase();
+      ireeCompilerInvocationDestroy(inv);
+      ireeCompilerSessionDestroy(session);
+      ireeCompilerGlobalShutdown();
+      return 1;
+    }
+    std::string deviceID = backend->getLegacyDefaultDeviceID();
+    SmallVector<HAL::ExecutableTargetAttr> targets;
+    backend->getDefaultExecutableTargets(ctx, deviceID,
+                                         DictionaryAttr::get(ctx), targets);
+    if (targets.empty()) {
+      llvm::errs() << "Error: target backend '" << targetBackendName
+                   << "' returned no executable targets; check target flags "
+                      "(e.g., --iree-rocm-target)\n";
+      moduleOp->erase();
+      ireeCompilerInvocationDestroy(inv);
+      ireeCompilerSessionDestroy(session);
+      ireeCompilerGlobalShutdown();
+      return 1;
+    }
+    moduleOp->setAttr("hal.executable.target", targets.front());
   }
 
   // --- Build and run the pipeline programmatically ---
   {
-    PassManager pm(&context);
+    PassManager pm(ctx);
     pm.enableVerifier();
 
-    // Step 1: Wrap func.func into hal.executable structure.
+    // Converts func.func → hal.executable (reads attr from module).
     pm.addPass(iree_compiler::createConvertFuncToHALExecutablePass());
 
-    // Step 2: GPU codegen (tiling, vectorization, lowering to LLVM+ROCDL).
+    // Configure and translate executables with session registry.
     {
-      auto &variantPM = pm.nest<HAL::ExecutableOp>()
-                            .nest<HAL::ExecutableVariantOp>();
-      iree_compiler::buildLLVMGPUCodegenConfigurationPassPipeline(variantPM);
-      iree_compiler::buildLLVMGPUCodegenPassPipeline(
-          variantPM, /*useROCM=*/true, /*preserveDebugInfo=*/false);
+      auto &execPM = pm.nest<HAL::ExecutableOp>();
+
+      iree_compiler::IREE::HAL::ConfigureExecutablesPassOptions configOpts;
+      configOpts.targetRegistry = registry;
+      execPM.addPass(
+          iree_compiler::IREE::HAL::createConfigureExecutablesPass(configOpts));
+
+      iree_compiler::IREE::HAL::TranslateAllExecutablesPassOptions
+          translateOpts;
+      translateOpts.targetRegistry = registry;
+      execPM.addPass(
+          iree_compiler::IREE::HAL::createTranslateAllExecutablesPass(
+              translateOpts));
     }
 
-    // Step 3: Extract workgroup count region as standalone func.
+    // Extract workgroup count as func.func.
     pm.addPass(iree_compiler::createExtractWorkgroupCountAsFuncPass());
 
-    // Step 4: Lower affine ops in the extracted func to arith.
-    pm.addNestedPass<func::FuncOp>(createLowerAffinePass());
-
-    // Step 5: Serialize to HSACO (unless --no-serialize).
-    if (!noSerialize) {
-      pm.nest<HAL::ExecutableOp>().addPass(
-          HAL::createSerializeAllExecutablesPass());
+    // Lower affine ops in func.func scope.
+    if (failed(
+            parsePassPipeline("func.func(lower-affine)", pm, llvm::errs()))) {
+      llvm::errs() << "Error: failed to parse lower-affine pipeline\n";
+      moduleOp->erase();
+      ireeCompilerInvocationDestroy(inv);
+      ireeCompilerSessionDestroy(session);
+      ireeCompilerGlobalShutdown();
+      return 1;
     }
 
-    if (failed(pm.run(*moduleRef))) {
+    // Serialize executables (optional).
+    if (!noSerialize) {
+      iree_compiler::IREE::HAL::SerializeAllExecutablesPassOptions
+          serializeOpts;
+      serializeOpts.targetRegistry = registry;
+      pm.nest<HAL::ExecutableOp>().addPass(
+          iree_compiler::IREE::HAL::createSerializeAllExecutablesPass(
+              serializeOpts));
+    }
+
+    if (failed(pm.run(moduleOp))) {
       llvm::errs() << "Error: codegen pipeline failed\n";
+      moduleOp->erase();
+      ireeCompilerInvocationDestroy(inv);
+      ireeCompilerSessionDestroy(session);
+      ireeCompilerGlobalShutdown();
       return 1;
     }
   }
 
   // --- Extract artifacts or print MLIR ---
+  int result = 0;
   if (!outputDir.empty()) {
     if (auto ec = llvm::sys::fs::create_directories(outputDir)) {
       llvm::errs() << "Error: cannot create " << outputDir << "\n";
-      return 1;
+      result = 1;
     }
 
-    if (compileWorkgroupCountToSO(*moduleRef, outputDir) != 0) {
-      return 1;
+    if (result == 0 && compileWorkgroupCountToSO(moduleOp, outputDir) != 0) {
+      result = 1;
     }
 
-    return writeArtifacts(*moduleRef, outputDir);
+    if (result == 0) {
+      result = writeArtifacts(moduleOp, outputDir, targetBackendName);
+    }
+  } else {
+    // Print MLIR to output file.
+    std::string errorMessage;
+    auto output = openOutputFile(outputFilename, &errorMessage);
+    if (!output) {
+      llvm::errs() << errorMessage << "\n";
+      result = 1;
+    } else {
+      moduleOp.print(output->os());
+      output->keep();
+    }
   }
 
-  // Print MLIR to output file.
-  auto output = openOutputFile(outputFilename, &errorMessage);
-  if (!output) {
-    llvm::errs() << errorMessage << "\n";
-    return 1;
-  }
-  moduleRef->print(output->os());
-  output->keep();
-  return 0;
+  // --- Cleanup ---
+  moduleOp->erase();
+  ireeCompilerInvocationDestroy(inv);
+  ireeCompilerSessionDestroy(session);
+  ireeCompilerGlobalShutdown();
+  return result;
 }

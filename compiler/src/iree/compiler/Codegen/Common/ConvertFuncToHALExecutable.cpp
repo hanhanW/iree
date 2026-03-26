@@ -5,13 +5,14 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "iree/compiler/Codegen/Common/Passes.h"
-#include "iree/compiler/Codegen/Utils/GPUUtils.h"
 #include "iree/compiler/Dialect/HAL/IR/HALDialect.h"
 #include "iree/compiler/Dialect/HAL/IR/HALOps.h"
 #include "iree/compiler/Dialect/HAL/IR/HALTypes.h"
 #include "iree/compiler/Dialect/TensorExt/IR/TensorExtDialect.h"
 #include "iree/compiler/Dialect/TensorExt/IR/TensorExtOps.h"
 #include "iree/compiler/Dialect/TensorExt/IR/TensorExtTypes.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Debug.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
@@ -20,8 +21,6 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/Pass/Pass.h"
-#include "llvm/ADT/SmallVector.h"
-#include "llvm/Support/Debug.h"
 
 #define DEBUG_TYPE "iree-codegen-convert-func-to-hal-executable"
 
@@ -104,8 +103,9 @@ buildPipelineLayout(MLIRContext *ctx, ArrayRef<ArgInfo> argInfos,
                     int64_t bindingCount, int64_t pushConstantCount) {
   SmallVector<IREE::HAL::PipelineBindingAttr> bindings;
   for (auto &info : argInfos) {
-    if (info.kind != ArgInfo::Tensor)
+    if (info.kind != ArgInfo::Tensor) {
       continue;
+    }
     auto flags = info.isOutput ? IREE::HAL::DescriptorFlags::None
                                : IREE::HAL::DescriptorFlags::ReadOnly;
     bindings.push_back(IREE::HAL::PipelineBindingAttr::get(
@@ -123,8 +123,9 @@ buildTensorDimMap(func::FuncOp funcOp, ArrayRef<ArgInfo> argInfos) {
   DenseMap<unsigned, SmallVector<unsigned>> dimMap;
 
   for (unsigned i = 0; i < argInfos.size(); ++i) {
-    if (argInfos[i].kind != ArgInfo::Tensor)
+    if (argInfos[i].kind != ArgInfo::Tensor) {
       continue;
+    }
     auto tensorType =
         cast<RankedTensorType>(funcOp.getFunctionType().getInput(i));
     int64_t numDynDims = tensorType.getNumDynamicDims();
@@ -147,11 +148,11 @@ buildTensorDimMap(func::FuncOp funcOp, ArrayRef<ArgInfo> argInfos) {
 
 // Creates the inner func.func with HAL interface ops replacing the original
 // tensor/index arguments.
-static func::FuncOp buildInnerFunc(
-    OpBuilder &builder, Location loc, StringRef name,
-    func::FuncOp sourceFuncOp, ArrayRef<ArgInfo> argInfos,
-    IREE::HAL::PipelineLayoutAttr layoutAttr,
-    const DenseMap<unsigned, SmallVector<unsigned>> &tensorDimMap) {
+static func::FuncOp
+buildInnerFunc(OpBuilder &builder, Location loc, StringRef name,
+               func::FuncOp sourceFuncOp, ArrayRef<ArgInfo> argInfos,
+               IREE::HAL::PipelineLayoutAttr layoutAttr,
+               const DenseMap<unsigned, SmallVector<unsigned>> &tensorDimMap) {
   auto funcType = FunctionType::get(builder.getContext(), {}, {});
   auto newFuncOp = func::FuncOp::create(builder, loc, name, funcType);
 
@@ -204,14 +205,14 @@ static func::FuncOp buildInnerFunc(
 
   // Second pass: create binding subspans and tensor loads for tensor args.
   for (auto &info : argInfos) {
-    if (info.kind != ArgInfo::Tensor)
+    if (info.kind != ArgInfo::Tensor) {
       continue;
+    }
 
     auto tensorType = cast<RankedTensorType>(
         sourceFuncOp.getFunctionType().getInput(info.funcArgIndex));
-    auto access = info.isOutput
-                      ? IREE::TensorExt::TensorAccess::WriteOnly
-                      : IREE::TensorExt::TensorAccess::ReadOnly;
+    auto access = info.isOutput ? IREE::TensorExt::TensorAccess::WriteOnly
+                                : IREE::TensorExt::TensorAccess::ReadOnly;
     auto dispatchTensorType =
         IREE::TensorExt::DispatchTensorType::get(access, tensorType);
 
@@ -277,14 +278,16 @@ static func::FuncOp buildInnerFunc(
 
     // Find the output binding for this result.
     for (auto &info : argInfos) {
-      if (info.kind != ArgInfo::Tensor || !info.isOutput)
+      if (info.kind != ArgInfo::Tensor || !info.isOutput) {
         continue;
+      }
       // Match via iree.abi.output index.
       auto outputAttr =
           sourceFuncOp.getArgAttr(info.funcArgIndex, "iree.abi.output");
       auto outputIdx = cast<IntegerAttr>(outputAttr).getInt();
-      if (outputIdx != static_cast<int64_t>(i))
+      if (outputIdx != static_cast<int64_t>(i)) {
         continue;
+      }
 
       Value outputBinding = argValues[info.funcArgIndex];
       auto tensorType = cast<RankedTensorType>(
@@ -308,14 +311,13 @@ static func::FuncOp buildInnerFunc(
         if (tensorType.isDynamicDim(j)) {
           sizes.push_back(dynamicDims[dynDimIdx++]);
         } else {
-          sizes.push_back(
-              entryBuilder.getIndexAttr(tensorType.getDimSize(j)));
+          sizes.push_back(entryBuilder.getIndexAttr(tensorType.getDimSize(j)));
         }
       }
 
-      IREE::TensorExt::DispatchTensorStoreOp::create(
-          entryBuilder, loc, result, outputBinding, dynamicDims, offsets, sizes,
-          strides);
+      IREE::TensorExt::DispatchTensorStoreOp::create(entryBuilder, loc, result,
+                                                     outputBinding, dynamicDims,
+                                                     offsets, sizes, strides);
       break;
     }
   }
@@ -333,8 +335,9 @@ struct ConvertFuncToHALExecutablePass final
     SmallVector<func::FuncOp> funcsToConvert;
     getOperation().walk([&](func::FuncOp funcOp) {
       // Only convert public functions with tensor arguments.
-      if (!funcOp.isPublic())
+      if (!funcOp.isPublic()) {
         return;
+      }
       bool hasTensorArg = false;
       for (Type argType : funcOp.getFunctionType().getInputs()) {
         if (isa<RankedTensorType>(argType)) {
@@ -342,16 +345,19 @@ struct ConvertFuncToHALExecutablePass final
           break;
         }
       }
-      if (hasTensorArg)
+      if (hasTensorArg) {
         funcsToConvert.push_back(funcOp);
+      }
     });
 
-    if (funcsToConvert.empty())
+    if (funcsToConvert.empty()) {
       return;
+    }
 
     for (auto funcOp : funcsToConvert) {
-      if (failed(convertFunc(funcOp)))
+      if (failed(convertFunc(funcOp))) {
         return signalPassFailure();
+      }
     }
   }
 
@@ -365,10 +371,10 @@ struct ConvertFuncToHALExecutablePass final
     SmallVector<ArgInfo> argInfos;
     int64_t bindingCount = 0, pushConstantCount = 0;
     SmallVector<int64_t> workloadOrdinalToPushConstant;
-    if (failed(parseArguments(funcOp, argInfos, bindingCount,
-                              pushConstantCount,
-                              workloadOrdinalToPushConstant)))
+    if (failed(parseArguments(funcOp, argInfos, bindingCount, pushConstantCount,
+                              workloadOrdinalToPushConstant))) {
       return failure();
+    }
 
     // Build the pipeline layout.
     auto layoutAttr =
@@ -377,25 +383,22 @@ struct ConvertFuncToHALExecutablePass final
     // Build tensor dim map.
     auto tensorDimMap = buildTensorDimMap(funcOp, argInfos);
 
-    // Create target attribute with full GPU target info if available.
-    IREE::HAL::ExecutableTargetAttr targetAttr;
-    {
-      SmallVector<NamedAttribute> config;
-      if (auto gpuTarget = getCLGPUTarget(ctx)) {
-        addConfigGPUTarget(ctx, gpuTarget, config);
-        config.emplace_back(StringAttr::get(ctx, "abi"),
-                            StringAttr::get(ctx, "hip"));
-      }
-      targetAttr = IREE::HAL::ExecutableTargetAttr::get(
-          ctx, StringAttr::get(ctx, targetBackend),
-          StringAttr::get(ctx, targetFormat),
-          DictionaryAttr::get(ctx, config));
+    // Read the ExecutableTargetAttr from the module. The caller (e.g.,
+    // iree-device-codegen) must attach it before running this pass.
+    auto targetAttr =
+        getOperation()->getAttrOfType<IREE::HAL::ExecutableTargetAttr>(
+            "hal.executable.target");
+    if (!targetAttr) {
+      funcOp.emitError(
+          "missing 'hal.executable.target' attribute on the module; "
+          "the caller must set it before running this pass");
+      return failure();
     }
 
     // Create the hal.executable.
     StringRef funcName = funcOp.getName();
-    auto executableOp = IREE::HAL::ExecutableOp::create(
-        moduleBuilder, loc, funcName);
+    auto executableOp =
+        IREE::HAL::ExecutableOp::create(moduleBuilder, loc, funcName);
     executableOp.setPublic();
 
     // Create the hal.executable.variant.
@@ -433,22 +436,20 @@ struct ConvertFuncToHALExecutablePass final
       Operation *countOp =
           IREE::TensorExt::DispatchWorkgroupCountFromSliceOp::create(
               countBuilder, loc, workloadArgs);
-      IREE::HAL::ReturnOp::create(countBuilder, loc,
-                                   countOp->getResults());
+      IREE::HAL::ReturnOp::create(countBuilder, loc, countOp->getResults());
     }
 
     // Create the inner builtin.module inside the variant (before terminator).
     {
-      OpBuilder beforeTermBuilder = OpBuilder::atBlockTerminator(
-          &variantOp.getBlock());
+      OpBuilder beforeTermBuilder =
+          OpBuilder::atBlockTerminator(&variantOp.getBlock());
       ModuleOp::create(beforeTermBuilder, loc);
     }
     auto innerModuleOp = variantOp.getInnerModule();
 
-    OpBuilder innerBuilder = OpBuilder::atBlockBegin(
-        innerModuleOp.getBody());
-    buildInnerFunc(innerBuilder, loc, funcName, funcOp,
-                   argInfos, layoutAttr, tensorDimMap);
+    OpBuilder innerBuilder = OpBuilder::atBlockBegin(innerModuleOp.getBody());
+    buildInnerFunc(innerBuilder, loc, funcName, funcOp, argInfos, layoutAttr,
+                   tensorDimMap);
 
     // Remove the original func.func.
     funcOp.erase();

@@ -16,7 +16,7 @@
 // RUN:     --output=@%t/expected.npy
 //
 // Step 2: Compile to HSACO via device-codegen.
-// RUN: iree-device-codegen --iree-gpu-test-target=gfx1100 \
+// RUN: iree-device-codegen --iree-rocm-target=gfx1100 \
 // RUN:     --output-dir=%t %s
 //
 // Step 3: Launch on GPU and verify against CPU reference.

@@ -116,14 +116,6 @@ def ConvertFuncToHALExecutablePass
     - hal.executable.export with workgroup count region
     - builtin.module with the converted func.func using HAL interface ops
   }];
-  let options = [
-    Option<"targetBackend", "target-backend", "std::string",
-           /*default=*/"\"rocm\"",
-           "Target backend (e.g., \"rocm\", \"cuda\")">,
-    Option<"targetFormat", "target-format", "std::string",
-           /*default=*/"\"rocm-hsaco-fb\"",
-           "Target format (e.g., \"rocm-hsaco-fb\", \"cuda-nvptx-fb\")">,
-  ];
   let dependentDialects = [
     "mlir::arith::ArithDialect",
     "mlir::tensor::TensorDialect",

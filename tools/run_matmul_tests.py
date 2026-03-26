@@ -112,7 +112,7 @@ def compile_test(mlir_path, build_dir, target, work_dir):
 
     rc, out, err = run_cmd([
         device_codegen,
-        f"--iree-gpu-test-target={target}",
+        f"--iree-rocm-target={target}",
         f"--output-dir={work_dir}",
         mlir_path,
     ])

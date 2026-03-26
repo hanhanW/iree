@@ -1708,3 +1708,10 @@ MlirOperation
 ireeCompilerInvocationExportStealModule(iree_compiler_invocation_t *inv) {
   return wrap(unwrap(inv)->exportModule());
 }
+
+const void *
+ireeCompilerSessionGetTargetRegistry(iree_compiler_session_t *session) {
+  auto &s = *unwrap(session);
+  (void)s.activatePluginsOnce();
+  return &s.targetRegistry;
+}

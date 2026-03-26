@@ -182,28 +182,22 @@ iree_cc_library(
     LLVMX86CodeGen
     LLVMX86Desc
     LLVMX86Info
-    MLIRAffineToStandard
     MLIRArithToLLVM
     MLIRBuiltinToLLVMIRTranslation
+    MLIRCAPIIR
     MLIRFuncToLLVM
     MLIRIndexToLLVM
     MLIRIR
     MLIRLLVMToLLVMIRTranslation
-    MLIRParser
     MLIRPass
     MLIRReconcileUnrealizedCasts
     MLIRSupport
     MLIRTargetLLVMIRExport
+    iree::compiler::API::Internal::CompilerDriver
     iree::compiler::Codegen::Common
-    iree::compiler::Codegen::LLVMGPU
     iree::compiler::Dialect::HAL::IR
     iree::compiler::Dialect::HAL::Target
     iree::compiler::Dialect::HAL::Transforms
-    iree::compiler::Dialect::VM::Target::init_targets
-    iree::compiler::Pipelines::Options
-    iree::compiler::PluginAPI::PluginManager
-    iree::compiler::Tools::init_llvmir_translations
-    iree::compiler::Tools::init_passes_and_dialects
     iree::compiler::Utils
     iree::compiler::bindings::c::headers
   PUBLIC

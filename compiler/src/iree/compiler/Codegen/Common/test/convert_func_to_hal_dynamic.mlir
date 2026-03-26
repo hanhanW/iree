@@ -2,6 +2,7 @@
 
 // Test: dynamic-shape batched matmul + bias is converted to hal.executable
 // with push constants for dynamic dimensions.
+// The module must carry an hal.executable.target attr for the pass.
 
 // CHECK-LABEL: hal.executable public @matmul_bias
 // CHECK:   hal.executable.variant public @rocm_hsaco_fb
@@ -33,6 +34,7 @@
 // CHECK:         linalg.generic
 // CHECK:         iree_tensor_ext.dispatch.tensor.store
 
+module attributes {"hal.executable.target" = #hal.executable.target<"rocm", "rocm-hsaco-fb", {abi = "hip", iree.encoding.resolver = #iree_gpu.gpu_encoding_resolver<>, iree_codegen.target_info = #iree_gpu.target<arch = "gfx1100", features = "", wgp = <compute = fp64|fp32|fp16|int64|int32|int16|int8, storage = b64|b32|b16|b8, subgroup = shuffle|arithmetic, dot = dp4xi8toi32, mma = [<WMMAR3_F32_16x16x16_F16>, <WMMAR3_F16_16x16x16_F16>, <WMMAR3_F32_16x16x16_BF16>, <WMMAR3_BF16_16x16x16_BF16>, <WMMAR3_I32_16x16x16_I8>], subgroup_size_choices = [32, 64], max_workgroup_sizes = [1024, 1024, 1024], max_thread_count_per_workgroup = 1024, max_workgroup_memory_bytes = 65536, max_workgroup_counts = [2147483647, 2147483647, 2147483647], max_load_instruction_bits = 128, simds_per_wgp = 4, vgpr_space_bits = 8192, workgroup_memory_bank_count = 64>>, ukernels = "none"}>} {
 func.func @matmul_bias(
     %lhs : tensor<?x128x256xf32>, %lhs_dim : index,
     %rhs : tensor<?x256x512xf32>, %rhs_dim : index,
@@ -68,4 +70,5 @@ func.func @matmul_bias(
       linalg.yield %t0 : f32
     } -> tensor<?x128x512xf32>
   return %bias_add : tensor<?x128x512xf32>
+}
 }

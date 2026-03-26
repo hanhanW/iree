@@ -1,4 +1,4 @@
-// RUN: iree-opt --iree-gpu-test-target=gfx1100 \
+// RUN: iree-opt \
 // RUN:   --pass-pipeline="builtin.module( \
 // RUN:     iree-codegen-convert-func-to-hal-executable, \
 // RUN:     hal.executable(hal.executable.variant( \
@@ -7,7 +7,7 @@
 // RUN:     iree-codegen-extract-workgroup-count-as-func)" \
 // RUN:   --split-input-file %s | FileCheck %s --check-prefix=STATIC
 
-// RUN: iree-opt --iree-gpu-test-target=gfx1100 \
+// RUN: iree-opt \
 // RUN:   --pass-pipeline="builtin.module( \
 // RUN:     iree-codegen-convert-func-to-hal-executable, \
 // RUN:     hal.executable(hal.executable.variant( \
@@ -28,6 +28,7 @@
 // STATIC:   %[[Z:.+]] = arith.constant
 // STATIC:   return %[[X]], %[[Y]], %[[Z]] : index, index, index
 
+module attributes {"hal.executable.target" = #hal.executable.target<"rocm", "rocm-hsaco-fb", {abi = "hip", iree.encoding.resolver = #iree_gpu.gpu_encoding_resolver<>, iree_codegen.target_info = #iree_gpu.target<arch = "gfx1100", features = "", wgp = <compute = fp64|fp32|fp16|int64|int32|int16|int8, storage = b64|b32|b16|b8, subgroup = shuffle|arithmetic, dot = dp4xi8toi32, mma = [<WMMAR3_F32_16x16x16_F16>, <WMMAR3_F16_16x16x16_F16>, <WMMAR3_F32_16x16x16_BF16>, <WMMAR3_BF16_16x16x16_BF16>, <WMMAR3_I32_16x16x16_I8>], subgroup_size_choices = [32, 64], max_workgroup_sizes = [1024, 1024, 1024], max_thread_count_per_workgroup = 1024, max_workgroup_memory_bytes = 65536, max_workgroup_counts = [2147483647, 2147483647, 2147483647], max_load_instruction_bits = 128, simds_per_wgp = 4, vgpr_space_bits = 8192, workgroup_memory_bank_count = 64>>, ukernels = "none"}>} {
 func.func @static_matmul(
     %lhs : tensor<4x128x256xf32>,
     %rhs : tensor<4x256x512xf32>,
@@ -63,6 +64,7 @@ func.func @static_matmul(
     } -> tensor<4x128x512xf32>
   return %bias_add : tensor<4x128x512xf32>
 }
+}
 
 // -----
 
@@ -76,6 +78,7 @@ func.func @static_matmul(
 // DYNAMIC-SAME: workgroup_size = [{{[0-9]+}} : index, {{[0-9]+}} : index, {{[0-9]+}} : index]
 // DYNAMIC:   return {{.*}} : index, index, index
 
+module attributes {"hal.executable.target" = #hal.executable.target<"rocm", "rocm-hsaco-fb", {abi = "hip", iree.encoding.resolver = #iree_gpu.gpu_encoding_resolver<>, iree_codegen.target_info = #iree_gpu.target<arch = "gfx1100", features = "", wgp = <compute = fp64|fp32|fp16|int64|int32|int16|int8, storage = b64|b32|b16|b8, subgroup = shuffle|arithmetic, dot = dp4xi8toi32, mma = [<WMMAR3_F32_16x16x16_F16>, <WMMAR3_F16_16x16x16_F16>, <WMMAR3_F32_16x16x16_BF16>, <WMMAR3_BF16_16x16x16_BF16>, <WMMAR3_I32_16x16x16_I8>], subgroup_size_choices = [32, 64], max_workgroup_sizes = [1024, 1024, 1024], max_thread_count_per_workgroup = 1024, max_workgroup_memory_bytes = 65536, max_workgroup_counts = [2147483647, 2147483647, 2147483647], max_load_instruction_bits = 128, simds_per_wgp = 4, vgpr_space_bits = 8192, workgroup_memory_bank_count = 64>>, ukernels = "none"}>} {
 func.func @dynamic_matmul(
     %lhs : tensor<?x128x256xf32>, %lhs_dim : index,
     %rhs : tensor<?x256x512xf32>, %rhs_dim : index,
@@ -111,4 +114,5 @@ func.func @dynamic_matmul(
       linalg.yield %t0 : f32
     } -> tensor<?x128x512xf32>
   return %bias_add : tensor<?x128x512xf32>
+}
 }

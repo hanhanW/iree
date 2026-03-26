@@ -76,6 +76,12 @@ MLIR_CAPI_EXPORTED
 MlirOperation
 ireeCompilerInvocationExportStealModule(iree_compiler_invocation_t *inv);
 
+// Returns a pointer to the session's HAL target registry. The pointer is
+// valid for the lifetime of the session. Activates plugins if not already
+// activated.
+MLIR_CAPI_EXPORTED const void *
+ireeCompilerSessionGetTargetRegistry(iree_compiler_session_t *session);
+
 #ifdef __cplusplus
 }
 #endif
