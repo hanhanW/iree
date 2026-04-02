@@ -922,12 +922,304 @@ public:
   }
 };
 
+//===----------------------------------------------------------------------===//
+// Flat ABI patterns — GPU-style direct function arguments for CPU.
+//===----------------------------------------------------------------------===//
+
+struct ConvertFuncFlatABI : public ConvertOpToLLVMPattern<func::FuncOp> {
+  explicit ConvertFuncFlatABI(LLVMTypeConverter &converter)
+      : ConvertOpToLLVMPattern(converter, /*benefit=*/100) {}
+  LogicalResult
+  matchAndRewrite(func::FuncOp funcOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    if (!funcOp.isPublic()) {
+      return failure();
+    }
+    FunctionType fnType = funcOp.getFunctionType();
+    if (fnType.getNumInputs() != 0 || fnType.getNumResults() != 0) {
+      return failure();
+    }
+
+    TypeConverter::SignatureConversion signatureConverter(/*numOrigInputs=*/0);
+    IREE::HAL::PipelineLayoutAttr layout;
+    funcOp.walk([&](IREE::HAL::InterfaceBindingSubspanOp subspanOp) {
+      if (!layout) {
+        layout = subspanOp.getLayout();
+      }
+    });
+    funcOp.walk([&](IREE::HAL::InterfaceConstantLoadOp constOp) {
+      if (!layout) {
+        layout = constOp.getLayout();
+      }
+      return WalkResult::interrupt();
+    });
+
+    int64_t numBindings = 0;
+    int64_t numConstants = 0;
+    if (layout) {
+      numConstants = layout.getConstants();
+      numBindings = layout.getBindings().size();
+    }
+
+    SmallVector<Type, 16> llvmInputTypes;
+    auto ptrType = LLVM::LLVMPointerType::get(rewriter.getContext());
+    auto i32Type = rewriter.getI32Type();
+    for (int64_t i = 0; i < numBindings; ++i) {
+      llvmInputTypes.push_back(ptrType);
+    }
+    for (int64_t i = 0; i < numConstants; ++i) {
+      llvmInputTypes.push_back(i32Type);
+    }
+    for (int i = 0; i < 6; ++i) {
+      llvmInputTypes.push_back(i32Type);
+    }
+    signatureConverter.addInputs(llvmInputTypes);
+
+    SmallVector<NamedAttribute> funcAttrs;
+    for (auto attr : funcOp->getAttrs()) {
+      if (attr.getName() == SymbolTable::getSymbolAttrName() ||
+          attr.getName() == funcOp.getFunctionTypeAttrName()) {
+        continue;
+      }
+      funcAttrs.push_back(attr);
+    }
+
+    auto llvmFuncType = LLVM::LLVMFunctionType::get(
+        LLVM::LLVMVoidType::get(rewriter.getContext()), llvmInputTypes);
+    auto newFuncOp = LLVM::LLVMFuncOp::create(
+        rewriter, funcOp.getLoc(), funcOp.getName(), llvmFuncType,
+        LLVM::Linkage::External, /*dsoLocal=*/false, /*cconv=*/LLVM::CConv::C,
+        /*comdat=*/nullptr, funcAttrs);
+
+    rewriter.inlineRegionBefore(funcOp.getFunctionBody(),
+                                newFuncOp.getFunctionBody(), newFuncOp.end());
+    if (failed(rewriter.convertRegionTypes(&newFuncOp.getFunctionBody(),
+                                           *typeConverter,
+                                           &signatureConverter))) {
+      return failure();
+    }
+
+    Attribute unit = rewriter.getUnitAttr();
+    for (int64_t i = 0; i < numBindings; ++i) {
+      newFuncOp.setArgAttr(i, LLVM::LLVMDialect::getAlignAttrName(),
+                           rewriter.getI32IntegerAttr(16));
+      newFuncOp.setArgAttr(i, LLVM::LLVMDialect::getNoAliasAttrName(), unit);
+      newFuncOp.setArgAttr(i, LLVM::LLVMDialect::getNonNullAttrName(), unit);
+      newFuncOp.setArgAttr(i, LLVM::LLVMDialect::getNoUndefAttrName(), unit);
+    }
+
+    // Store layout info as function attributes so other flat-ABI patterns
+    // can determine argument indices without walking for HAL ops (which
+    // may already be converted by the time they run).
+    newFuncOp->setAttr("iree.flat_abi.num_bindings",
+                        rewriter.getI64IntegerAttr(numBindings));
+    newFuncOp->setAttr("iree.flat_abi.num_constants",
+                        rewriter.getI64IntegerAttr(numConstants));
+
+    rewriter.eraseOp(funcOp);
+    return success();
+  }
+};
+
+struct ConvertBindingSubspanFlatABI final
+    : ConvertOpToLLVMPattern<IREE::HAL::InterfaceBindingSubspanOp> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+  LogicalResult
+  matchAndRewrite(IREE::HAL::InterfaceBindingSubspanOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto llvmFuncOp = op->getParentOfType<LLVM::LLVMFuncOp>();
+    if (!llvmFuncOp) {
+      return failure();
+    }
+    Location loc = op->getLoc();
+    MemRefType memrefType = dyn_cast<MemRefType>(op.getResult().getType());
+    Value llvmBufferArg =
+        llvmFuncOp.getArgument(op.getBinding().getZExtValue());
+    auto [strides, offset] = memrefType.getStridesAndOffset();
+    if (memrefType.hasStaticShape() &&
+        llvm::none_of(strides, ShapedType::isDynamic) &&
+        ShapedType::isStatic(offset)) {
+      auto desc = MemRefDescriptor::fromStaticShape(
+          rewriter, loc, *getTypeConverter(), memrefType, llvmBufferArg);
+      rewriter.replaceOp(op, {desc});
+    } else {
+      ValueRange dynamicDims = adaptor.getDynamicDims();
+      int64_t rank = memrefType.getRank();
+      auto desc = MemRefDescriptor::poison(
+          rewriter, loc, typeConverter->convertType(memrefType));
+      desc.setAllocatedPtr(rewriter, loc, llvmBufferArg);
+      desc.setAlignedPtr(rewriter, loc, llvmBufferArg);
+      auto llvmIndexType =
+          typeConverter->convertType(IndexType::get(rewriter.getContext()));
+      auto baseOffsetValue = adaptor.getByteOffset();
+      if (ShapedType::isDynamic(offset)) {
+        int32_t elementBitWidth =
+            IREE::Util::getTypeBitWidth(memrefType.getElementType());
+        Value elementBitWidthVal = LLVM::ConstantOp::create(
+            rewriter, loc, llvmIndexType, elementBitWidth);
+        Value eight =
+            LLVM::ConstantOp::create(rewriter, loc, llvmIndexType, 8);
+        Value offsetInBits =
+            LLVM::MulOp::create(rewriter, loc, baseOffsetValue, eight);
+        desc.setOffset(rewriter, loc,
+                       LLVM::UDivOp::create(rewriter, loc, offsetInBits,
+                                            elementBitWidthVal));
+      } else {
+        desc.setConstantOffset(rewriter, loc, offset);
+      }
+      // Set sizes forward (matching dynamic dim order).
+      unsigned dynDimIdx = 0;
+      for (int64_t i = 0; i < rank; ++i) {
+        if (memrefType.isDynamicDim(i)) {
+          desc.setSize(rewriter, loc, i, dynamicDims[dynDimIdx++]);
+        } else {
+          desc.setConstantSize(rewriter, loc, i, memrefType.getDimSize(i));
+        }
+      }
+      // Set strides backward (innermost stride = 1, outer = product).
+      OpFoldResult currentStride;
+      for (int64_t i = rank - 1; i >= 0; --i) {
+        if (i == rank - 1) {
+          currentStride = rewriter.getIndexAttr(1);
+          desc.setConstantStride(rewriter, loc, i, 1);
+        } else {
+          Value dim;
+          if (memrefType.isDynamicDim(i + 1)) {
+            dim = desc.size(rewriter, loc, i + 1);
+          } else {
+            dim = LLVM::ConstantOp::create(rewriter, loc, llvmIndexType,
+                                           memrefType.getDimSize(i + 1));
+          }
+          if (ShapedType::isDynamic(strides[i])) {
+            Value currentStrideVal;
+            if (auto attr = dyn_cast<Attribute>(currentStride)) {
+              currentStrideVal = LLVM::ConstantOp::create(
+                  rewriter, loc, llvmIndexType,
+                  cast<IntegerAttr>(attr).getInt());
+            } else {
+              currentStrideVal = cast<Value>(currentStride);
+            }
+            currentStride =
+                LLVM::MulOp::create(rewriter, loc, currentStrideVal, dim)
+                    .getResult();
+            desc.setStride(rewriter, loc, i, cast<Value>(currentStride));
+          } else {
+            currentStride = rewriter.getIndexAttr(strides[i]);
+            desc.setConstantStride(rewriter, loc, i, strides[i]);
+          }
+        }
+      }
+      rewriter.replaceOp(op, {desc});
+    }
+    return success();
+  }
+};
+
+// Helpers to read flat-ABI layout from attributes set by ConvertFuncFlatABI.
+static int64_t getFlatABINumBindings(LLVM::LLVMFuncOp funcOp) {
+  if (auto attr = funcOp->getAttrOfType<IntegerAttr>(
+          "iree.flat_abi.num_bindings")) {
+    return attr.getInt();
+  }
+  return 0;
+}
+static int64_t getFlatABINumConstants(LLVM::LLVMFuncOp funcOp) {
+  if (auto attr = funcOp->getAttrOfType<IntegerAttr>(
+          "iree.flat_abi.num_constants")) {
+    return attr.getInt();
+  }
+  return 0;
+}
+
+struct ConvertConstantLoadFlatABI final
+    : ConvertOpToLLVMPattern<IREE::HAL::InterfaceConstantLoadOp> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+  LogicalResult
+  matchAndRewrite(IREE::HAL::InterfaceConstantLoadOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto llvmFuncOp = op->getParentOfType<LLVM::LLVMFuncOp>();
+    if (!llvmFuncOp) {
+      return failure();
+    }
+    int64_t numBindings = getFlatABINumBindings(llvmFuncOp);
+    Value arg =
+        llvmFuncOp.getArgument(numBindings + op.getOrdinal().getZExtValue());
+    auto resultType = typeConverter->convertType(op->getResult(0).getType());
+    if (resultType != arg.getType()) {
+      arg = LLVM::ZExtOp::create(rewriter, op.getLoc(), resultType, arg);
+    }
+    rewriter.replaceOp(op, arg);
+    return success();
+  }
+};
+
+struct ConvertWorkgroupIDFlatABI final
+    : ConvertOpToLLVMPattern<IREE::HAL::InterfaceWorkgroupIDOp> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+  LogicalResult
+  matchAndRewrite(IREE::HAL::InterfaceWorkgroupIDOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto llvmFuncOp = op->getParentOfType<LLVM::LLVMFuncOp>();
+    if (!llvmFuncOp) {
+      return failure();
+    }
+    int64_t numBindings = getFlatABINumBindings(llvmFuncOp);
+    int64_t numConstants = getFlatABINumConstants(llvmFuncOp);
+    int64_t dim = op.getDimension().getZExtValue();
+    Value arg = llvmFuncOp.getArgument(numBindings + numConstants + dim);
+    auto resultType = typeConverter->convertType(op->getResult(0).getType());
+    if (resultType != arg.getType()) {
+      arg = LLVM::ZExtOp::create(rewriter, op.getLoc(), resultType, arg);
+    }
+    rewriter.replaceOp(op, arg);
+    return success();
+  }
+};
+
+struct ConvertWorkgroupCountFlatABI final
+    : ConvertOpToLLVMPattern<IREE::HAL::InterfaceWorkgroupCountOp> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+  LogicalResult
+  matchAndRewrite(IREE::HAL::InterfaceWorkgroupCountOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto llvmFuncOp = op->getParentOfType<LLVM::LLVMFuncOp>();
+    if (!llvmFuncOp) {
+      return failure();
+    }
+    int64_t numBindings = getFlatABINumBindings(llvmFuncOp);
+    int64_t numConstants = getFlatABINumConstants(llvmFuncOp);
+    int64_t dim = op.getDimension().getZExtValue();
+    Value arg = llvmFuncOp.getArgument(numBindings + numConstants + 3 + dim);
+    auto resultType = typeConverter->convertType(op->getResult(0).getType());
+    if (resultType != arg.getType()) {
+      arg = LLVM::ZExtOp::create(rewriter, op.getLoc(), resultType, arg);
+    }
+    rewriter.replaceOp(op, arg);
+    return success();
+  }
+};
+
+struct ConvertWorkgroupSizeFlatABI final
+    : ConvertOpToLLVMPattern<IREE::HAL::InterfaceWorkgroupSizeOp> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+  LogicalResult
+  matchAndRewrite(IREE::HAL::InterfaceWorkgroupSizeOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto resultType = typeConverter->convertType(op->getResult(0).getType());
+    rewriter.replaceOpWithNewOp<LLVM::ConstantOp>(
+        op, resultType, rewriter.getIntegerAttr(resultType, 1));
+    return success();
+  }
+};
+
 class ConvertToLLVMPass
     : public impl::ConvertToLLVMPassBase<ConvertToLLVMPass> {
 public:
   using Base::Base;
-  explicit ConvertToLLVMPass(bool reassociateFpReductions) {
+  explicit ConvertToLLVMPass(bool reassociateFpReductions,
+                             bool useFlatABI = false) {
     this->reassociateFpReductions = reassociateFpReductions;
+    this->flatABI = useFlatABI;
   }
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<arith::ArithDialect, math::MathDialect, func::FuncDialect,
@@ -1101,21 +1393,30 @@ void ConvertToLLVMPass::runOnOperation() {
   }
 
   HALDispatchABI abi(&typeConverter);
-  // clang-format off
-  patterns.insert<
-    ConvertHALEntryPointFuncOp,
-    ConvertHALExecutableConstantLoadOp,
-    ConvertHALInterfaceWorkgroupIDOp,
-    ConvertHALInterfaceWorkgroupSizeOp,
-    ConvertHALInterfaceWorkgroupCountOp,
-    ConvertHALInterfaceConstantLoadOp,
-    ConvertHALInterfaceBindingSubspanOp,
-    ConvertHALInstrumentWorkgroupOp,
-    ConvertHALInstrumentValueOp,
-    ConvertHALInstrumentMemoryLoadOp,
-    ConvertHALInstrumentMemoryStoreOp
-  >(abi, typeConverter);
-  // clang-format on
+  if (flatABI) {
+    // Flat ABI: buffer pointers + push constants + workgroup args as direct
+    // function arguments. No IREE dispatch structs.
+    patterns.insert<ConvertFuncFlatABI>(typeConverter);
+    patterns.insert<ConvertBindingSubspanFlatABI, ConvertConstantLoadFlatABI,
+                    ConvertWorkgroupIDFlatABI, ConvertWorkgroupCountFlatABI,
+                    ConvertWorkgroupSizeFlatABI>(typeConverter);
+  } else {
+    // clang-format off
+    patterns.insert<
+      ConvertHALEntryPointFuncOp,
+      ConvertHALExecutableConstantLoadOp,
+      ConvertHALInterfaceWorkgroupIDOp,
+      ConvertHALInterfaceWorkgroupSizeOp,
+      ConvertHALInterfaceWorkgroupCountOp,
+      ConvertHALInterfaceConstantLoadOp,
+      ConvertHALInterfaceBindingSubspanOp,
+      ConvertHALInstrumentWorkgroupOp,
+      ConvertHALInstrumentValueOp,
+      ConvertHALInstrumentMemoryLoadOp,
+      ConvertHALInstrumentMemoryStoreOp
+    >(abi, typeConverter);
+    // clang-format on
+  }
 
   target.addLegalOp<ModuleOp>();
   target.addIllegalDialect<func::FuncDialect, mlir::arith::ArithDialect,
@@ -1134,7 +1435,8 @@ void ConvertToLLVMPass::runOnOperation() {
   }
 
   // Rewrite any extern calls emitted to dynamic library imports.
-  {
+  // Skip in flat ABI mode — no IREE dispatch ABI or dynamic imports.
+  if (!flatABI) {
     RewritePatternSet patterns(&getContext());
     patterns.insert<RewriteExternCallOpToDynamicImportCallOp, RewriteCallOpABI,
                     RewriteFuncOpABI>(abi, typeConverter);
@@ -1158,8 +1460,8 @@ void ConvertToLLVMPass::runOnOperation() {
 }
 
 std::unique_ptr<OperationPass<ModuleOp>>
-createConvertToLLVMPass(bool reassociateFpReductions) {
-  return std::make_unique<ConvertToLLVMPass>(reassociateFpReductions);
+createConvertToLLVMPass(bool reassociateFpReductions, bool flatABI) {
+  return std::make_unique<ConvertToLLVMPass>(reassociateFpReductions, flatABI);
 }
 
 } // namespace mlir::iree_compiler

@@ -472,7 +472,8 @@ void addCPUDefaultPassPipeline(OpPassManager &funcPassManager,
 
 static void addLowerToLLVMPasses(OpPassManager &modulePassManager,
                                  bool enableAArch64SME,
-                                 const CPUCodegenOptions &cpuOpts) {
+                                 const CPUCodegenOptions &cpuOpts,
+                                 bool flatABI = false) {
   // TODO: Remove the following pass and plumb support for #hal.descriptor_type
   // memory space through the stack.
   FunctionLikeNest(modulePassManager)
@@ -602,7 +603,7 @@ static void addLowerToLLVMPasses(OpPassManager &modulePassManager,
     });
   }
   modulePassManager.addPass(
-      createConvertToLLVMPass(cpuOpts.reassociateFpReductions));
+      createConvertToLLVMPass(cpuOpts.reassociateFpReductions, flatABI));
   modulePassManager.addPass(createReconcileUnrealizedCastsPass());
 
   // We rely on MLIR symbol visibility being correct after this point and need
@@ -654,7 +655,7 @@ void buildLLVMCPUCodegenConfigurationPassPipeline(
 
 void buildLLVMCPUCodegenPassPipeline(OpPassManager &variantPassManager,
                                      const CPUCodegenOptions &cpuOpts,
-                                     bool enableAArch64SME) {
+                                     bool enableAArch64SME, bool flatABI) {
   {
     OpPassManager &modulePassManager = variantPassManager.nest<ModuleOp>();
     modulePassManager.addPass(createLowerExecutableUsingTransformDialectPass());
@@ -677,7 +678,7 @@ void buildLLVMCPUCodegenPassPipeline(OpPassManager &variantPassManager,
   // Run conversion to LLVM at `ModuleOp` granularity.
   {
     OpPassManager &modulePassManager = variantPassManager.nest<ModuleOp>();
-    addLowerToLLVMPasses(modulePassManager, enableAArch64SME, cpuOpts);
+    addLowerToLLVMPasses(modulePassManager, enableAArch64SME, cpuOpts, flatABI);
   }
   LLVM_DEBUG({
     llvm::dbgs() << "LLVMCPU codegen pass pipeline:\n";

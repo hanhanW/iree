@@ -26,6 +26,10 @@ def ConvertToLLVMPass :
     Option<"targetDataLayout", "target-data-layout", "std::string",
            /*default=*/"",
            "Code generation target data layout.">,
+    Option<"flatABI", "flat-abi", "bool", /*default=*/"false",
+           "Use flat ABI (buffer pointers + push constants + workgroup "
+           "args as direct function arguments) instead of the IREE "
+           "dispatch struct ABI. Intended for standalone kernel launchers.">,
   ];
 }
 

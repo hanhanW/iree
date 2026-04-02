@@ -57,7 +57,7 @@ createLLVMCPUVerifyVectorSizeLegalityPass(
     int64_t maxAllowedNumberOfNativeVectors);
 
 std::unique_ptr<OperationPass<ModuleOp>>
-createConvertToLLVMPass(bool reassociateFpReordering);
+createConvertToLLVMPass(bool reassociateFpReordering, bool flatABI = false);
 
 //------------------------------------------------------------------------------
 // LLVMCPU Codegen specific patterns.
@@ -147,7 +147,8 @@ void buildLLVMCPUCodegenConfigurationPassPipeline(
 /// should operate on the module within the IREE::HAL::ExecutableOp.
 void buildLLVMCPUCodegenPassPipeline(OpPassManager &variantPassManager,
                                      const CPUCodegenOptions &codegenOptions,
-                                     bool enableAArch64SME = false);
+                                     bool enableAArch64SME = false,
+                                     bool flatABI = false);
 
 //----------------------------------------------------------------------------//
 // LLVMCPU Linking Passes and Pipelines
