@@ -238,7 +238,7 @@ static StringRef getKernelFilename(StringRef backendName) {
     return "kernel.hsaco";
   }
   if (backendName == "llvm-cpu") {
-    return "kernel.elf";
+    return "kernel.so";
   }
   if (backendName == "vulkan-spirv") {
     return "kernel.spv";
@@ -272,9 +272,12 @@ static int writeArtifacts(ModuleOp module, StringRef outputDir,
                  << " bytes)\n";
   });
 
-  // Extract workgroup_size/subgroup_size from extracted func.
+  // Extract workgroup_size/subgroup_size from extracted func, and
+  // num_bindings/num_constants from the export op's layout.
   std::string wgSizeStr;
   int64_t subgroupSize = 0;
+  int64_t numBindings = 0;
+  int64_t numConstants = 0;
   module.walk([&](func::FuncOp funcOp) {
     if (!funcOp.getName().ends_with("_workgroup_count")) {
       return;
@@ -294,6 +297,15 @@ static int writeArtifacts(ModuleOp module, StringRef outputDir,
       subgroupSize = sgSize.getInt();
     }
   });
+  // Get binding/constant counts from module attrs (set during pipeline).
+  if (auto attr = module->getAttrOfType<IntegerAttr>(
+          "iree.device_codegen.num_bindings")) {
+    numBindings = attr.getInt();
+  }
+  if (auto attr = module->getAttrOfType<IntegerAttr>(
+          "iree.device_codegen.num_constants")) {
+    numConstants = attr.getInt();
+  }
 
   // Write metadata.json.
   std::string metaPath = (outputDir + "/metadata.json").str();
@@ -313,6 +325,20 @@ static int writeArtifacts(ModuleOp module, StringRef outputDir,
   if (subgroupSize > 0) {
     fprintf(mf, ",\n  \"subgroup_size\": %ld", subgroupSize);
   }
+  fprintf(mf, ",\n  \"num_bindings\": %ld", numBindings);
+  fprintf(mf, ",\n  \"num_constants\": %ld", numConstants);
+  // Extract buffer alignment from native_vector_size in the target config.
+  int64_t bufferAlignment = 64;  // Safe default for AVX-512.
+  if (auto targetAttr =
+          module->getAttrOfType<HAL::ExecutableTargetAttr>(
+              "hal.executable.target")) {
+    if (auto config = targetAttr.getConfiguration()) {
+      if (auto nvs = config.getAs<IntegerAttr>("native_vector_size")) {
+        bufferAlignment = nvs.getInt();
+      }
+    }
+  }
+  fprintf(mf, ",\n  \"buffer_alignment\": %ld", bufferAlignment);
   fprintf(mf, "\n}\n");
   fclose(mf);
   llvm::errs() << "Wrote: " << metaPath << "\n";
@@ -340,26 +366,39 @@ int ireeDeviceCodegenRunMain(int argc, char **argv) {
       llvm::cl::desc("Skip serialization (codegen-only inspection)"),
       llvm::cl::init(false));
 
-  // Inject backend-specific serialization flags.
-  // For ROCM: force raw HSACO ELF output (not the default FlatBuffer).
-  // We scan argv before parsing to determine whether ROCM is the target.
+  // Inject backend-specific serialization flags based on argv scanning.
+  // We do this before CL parsing since the flags need to be present at parse
+  // time.
   SmallVector<const char *> augArgv(argv, argv + argc);
   {
-    bool hasContainerType = false;
+    bool hasROCMContainerType = false;
+    bool hasLLVMCPUContainerType = false;
+    bool isLLVMCPUBackend = false;
     bool isNonROCMBackend = false;
     for (int i = 1; i < argc; ++i) {
       if (strncmp(argv[i], "--iree-rocm-container-type", 26) == 0) {
-        hasContainerType = true;
+        hasROCMContainerType = true;
       }
-      // If the user explicitly sets a non-ROCM backend, don't inject
-      // the ROCM container type flag.
-      if (strncmp(argv[i], "--iree-hal-target-backends=", 27) == 0 &&
-          strstr(argv[i], "rocm") == nullptr) {
-        isNonROCMBackend = true;
+      if (strncmp(argv[i], "--iree-llvmcpu-container-type", 29) == 0) {
+        hasLLVMCPUContainerType = true;
+      }
+      if (strncmp(argv[i], "--iree-hal-target-backends=", 27) == 0) {
+        if (strstr(argv[i], "llvm-cpu") != nullptr) {
+          isLLVMCPUBackend = true;
+        }
+        if (strstr(argv[i], "rocm") == nullptr) {
+          isNonROCMBackend = true;
+        }
       }
     }
-    if (!hasContainerType && !noSerialize && !isNonROCMBackend) {
+    // ROCM: force raw HSACO ELF output (not the default FlatBuffer).
+    if (!hasROCMContainerType && !noSerialize && !isNonROCMBackend) {
       augArgv.push_back("--iree-rocm-container-type=hsaco");
+    }
+    // LLVMCPU: force raw .so output and system-native linking.
+    if (isLLVMCPUBackend && !hasLLVMCPUContainerType) {
+      augArgv.push_back("--iree-llvmcpu-container-type=raw");
+      augArgv.push_back("--iree-llvmcpu-link-embedded=false");
     }
   }
   int augArgc = augArgv.size();
@@ -395,7 +434,9 @@ int ireeDeviceCodegenRunMain(int argc, char **argv) {
     ireeCompilerGlobalShutdown();
     return 1;
   }
-  ireeCompilerSourceDestroy(source);
+  // NOTE: keep `source` alive — the invocation's SourceMgrDiagnosticHandler
+  // holds a reference to its SourceMgr. Destroying it early causes crashes
+  // when diagnostics (warnings/errors) are emitted during the pipeline.
 
   // --- Get session's target registry ---
   auto *registry = reinterpret_cast<const HAL::TargetRegistry *>(
@@ -469,13 +510,39 @@ int ireeDeviceCodegenRunMain(int argc, char **argv) {
     moduleOp->setAttr("hal.executable.target", targets.front());
   }
 
-  // --- Build and run the pipeline programmatically ---
+  // --- Phase 1: Convert func.func → hal.executable ---
   {
     PassManager pm(ctx);
     pm.enableVerifier();
-
-    // Converts func.func → hal.executable (reads attr from module).
     pm.addPass(iree_compiler::createConvertFuncToHALExecutablePass());
+    if (failed(pm.run(moduleOp))) {
+      llvm::errs() << "Error: ConvertFuncToHALExecutable failed\n";
+      moduleOp->erase();
+      ireeCompilerInvocationDestroy(inv);
+      ireeCompilerSessionDestroy(session);
+      ireeCompilerGlobalShutdown();
+      return 1;
+    }
+  }
+
+  // Extract binding/constant counts from the export op before the rest of
+  // the pipeline consumes them. Store as module-level attributes for
+  // metadata.json extraction later.
+  moduleOp.walk([&](HAL::ExecutableExportOp exportOp) {
+    if (auto layoutAttr = exportOp.getLayout()) {
+      moduleOp->setAttr("iree.device_codegen.num_bindings",
+                         IntegerAttr::get(IntegerType::get(ctx, 64),
+                                          layoutAttr.getBindings().size()));
+      moduleOp->setAttr("iree.device_codegen.num_constants",
+                         IntegerAttr::get(IntegerType::get(ctx, 64),
+                                          layoutAttr.getConstants()));
+    }
+  });
+
+  // --- Phase 2: Codegen, translation, and serialization ---
+  {
+    PassManager pm(ctx);
+    pm.enableVerifier();
 
     // Configure and translate executables with session registry.
     {
@@ -558,6 +625,7 @@ int ireeDeviceCodegenRunMain(int argc, char **argv) {
 
   // --- Cleanup ---
   moduleOp->erase();
+  ireeCompilerSourceDestroy(source);
   ireeCompilerInvocationDestroy(inv);
   ireeCompilerSessionDestroy(session);
   ireeCompilerGlobalShutdown();
