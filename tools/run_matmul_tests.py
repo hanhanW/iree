@@ -103,24 +103,37 @@ def shape_to_input_str(shape, dtype="f32"):
     return "x".join(str(d) for d in shape) + f"x{dtype}"
 
 
-def compile_test(mlir_path, build_dir, target, work_dir):
+def compile_test(mlir_path, build_dir, target, work_dir, backend="rocm"):
     """Compile a test via iree-device-codegen --output-dir.
 
     Returns (success, error_msg).
     """
     device_codegen = os.path.join(build_dir, "tools", "iree-device-codegen")
 
-    rc, out, err = run_cmd([
-        device_codegen,
-        f"--iree-rocm-target={target}",
-        f"--output-dir={work_dir}",
-        mlir_path,
-    ])
+    if backend == "llvm-cpu":
+        cmd = [
+            device_codegen,
+            f"--iree-hal-target-backends=llvm-cpu",
+            f"--iree-llvmcpu-target-cpu={target}",
+            f"--output-dir={work_dir}",
+            mlir_path,
+        ]
+        kernel_file = "kernel.so"
+    else:
+        cmd = [
+            device_codegen,
+            f"--iree-rocm-target={target}",
+            f"--output-dir={work_dir}",
+            mlir_path,
+        ]
+        kernel_file = "kernel.hsaco"
+
+    rc, out, err = run_cmd(cmd)
     if rc != 0:
         return False, f"Codegen failed:\n{err[-500:]}"
 
     # Verify artifacts exist.
-    for f in ["kernel.hsaco", "metadata.json", "workgroup_count.so"]:
+    for f in [kernel_file, "metadata.json", "workgroup_count.so"]:
         if not os.path.exists(os.path.join(work_dir, f)):
             return False, f"Missing artifact: {f}"
 
@@ -171,11 +184,15 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--test-dir", default="artifacts/tests")
     parser.add_argument("--build-dir", default="build")
-    parser.add_argument("--target", default="gfx1100")
+    parser.add_argument("--target", default="gfx1100",
+                        help="Target chip (e.g., gfx1100) or CPU (e.g., host)")
+    parser.add_argument("--backend", default="rocm",
+                        choices=["rocm", "llvm-cpu"],
+                        help="Backend: rocm (GPU) or llvm-cpu (CPU)")
     parser.add_argument(
         "--compile-only",
         action="store_true",
-        help="Only compile, skip GPU execution",
+        help="Only compile, skip execution",
     )
     parser.add_argument(
         "--filter", default=None, help="Only run tests matching this regex"
@@ -192,8 +209,11 @@ def main():
 
     manifest = json.load(open(manifest_path))
 
-    # Check for run-hip-kernel binary.
-    runner_bin = os.path.join(args.build_dir, "tools", "run-hip-kernel")
+    # Check for runner binary.
+    if args.backend == "llvm-cpu":
+        runner_bin = os.path.join(args.build_dir, "tools", "run-cpu-kernel")
+    else:
+        runner_bin = os.path.join(args.build_dir, "tools", "run-hip-kernel")
     has_runner = os.path.exists(runner_bin) and not args.compile_only
 
     if args.filter:
@@ -222,7 +242,7 @@ def main():
         with tempfile.TemporaryDirectory() as work_dir:
             # Compile.
             ok, err = compile_test(mlir_path, args.build_dir, args.target,
-                                   work_dir)
+                                   work_dir, backend=args.backend)
             if not ok:
                 print(f"  FAIL  {name:45s} {err[:80]}")
                 failed += 1

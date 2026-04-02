@@ -456,6 +456,13 @@ if(IREE_BUILD_COMPILER)
     )
   endif()
 
+  # run-cpu-kernel: standalone CPU kernel launcher (no IREE dependencies).
+  add_executable(run-cpu-kernel "${CMAKE_CURRENT_SOURCE_DIR}/run-cpu-kernel.cpp")
+  target_link_libraries(run-cpu-kernel PRIVATE dl pthread)
+  set_target_properties(run-cpu-kernel PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/tools"
+  )
+
   iree_cc_binary(
     NAME
       iree-mlir-lsp-server
