@@ -463,6 +463,18 @@ if(IREE_BUILD_COMPILER)
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/tools"
   )
 
+  # run-vulkan-kernel: standalone Vulkan compute kernel launcher.
+  # Loads libvulkan.so dynamically — no Vulkan SDK needed at build time.
+  add_executable(run-vulkan-kernel "${CMAKE_CURRENT_SOURCE_DIR}/run-vulkan-kernel.cpp")
+  target_include_directories(run-vulkan-kernel PRIVATE
+    "${PROJECT_SOURCE_DIR}"
+    "${PROJECT_SOURCE_DIR}/third_party/vulkan_headers/include"
+  )
+  target_link_libraries(run-vulkan-kernel PRIVATE dl)
+  set_target_properties(run-vulkan-kernel PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/tools"
+  )
+
   iree_cc_binary(
     NAME
       iree-mlir-lsp-server
