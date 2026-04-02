@@ -601,6 +601,15 @@ void LLVMCPUTargetCLOptions::bindOptions(OptionsBinder &binder) {
       llvm::cl::cat(category),
       llvm::cl::desc(
           "Link ukernel bitcode libraries into generated executables"));
+  binder.opt<LLVMCPUContainerType>(
+      "iree-llvmcpu-container-type", containerType, llvm::cl::cat(category),
+      llvm::cl::desc("Serialized executable container type."),
+      llvm::cl::values(
+          clEnumValN(LLVMCPUContainerType::Default, "default",
+                     "IREE executable library with LibraryBuilder metadata."),
+          clEnumValN(
+              LLVMCPUContainerType::Raw, "raw",
+              "Raw shared library with flat ABI (no IREE runtime needed).")));
 }
 
 LLVMTargetOptions LLVMCPUTargetCLOptions::getTargetOptions() {
@@ -649,6 +658,7 @@ LLVMTargetOptions LLVMCPUTargetCLOptions::getTargetOptions() {
   target.linkUkernelBitcode = linkUKernelBitcode;
 
   target.populateDefaultsFromTargetMachine();
+  targetOptions.containerType = containerType;
   return targetOptions;
 }
 

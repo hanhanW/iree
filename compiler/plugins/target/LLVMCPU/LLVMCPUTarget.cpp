@@ -248,8 +248,10 @@ public:
                                     OpPassManager &passManager) final {
     bool enableAArch64SME = isAArch64(targetAttr.getConfiguration()) &&
                             hasSMEFeature(targetAttr.getConfiguration());
+    bool flatABI =
+        defaultTargetOptions_.containerType == LLVMCPUContainerType::Raw;
     buildLLVMCPUCodegenPassPipeline(passManager, codegenOptions_,
-                                    enableAArch64SME);
+                                    enableAArch64SME, flatABI);
   }
 
   void buildLinkingPassPipeline(OpPassManager &passManager) final {
@@ -342,156 +344,160 @@ public:
       func.addFnAttr("hot");
     }
 
-    // Build the IREE HAL executable library metadata. The runtime uses this to
-    // find the entry point functions and their information.
-    LibraryBuilder::Mode libraryBuilderMode =
-        target.debugSymbols ? LibraryBuilder::Mode::INCLUDE_REFLECTION_ATTRS
-                            : LibraryBuilder::Mode::NONE;
-    LibraryBuilder libraryBuilder(llvmModule.get(), libraryBuilderMode,
-                                  LibraryBuilder::Version::LATEST);
+    bool isRawContainer =
+        defaultTargetOptions_.containerType == LLVMCPUContainerType::Raw;
+    llvm::Function *queryLibraryFunc = nullptr;
 
-    switch (target.sanitizerKind) {
-    case SanitizerKind::kNone: {
-      libraryBuilder.setSanitizerKind(LibraryBuilder::SanitizerKind::NONE);
-      break;
-    }
-    case SanitizerKind::kAddress: {
-      libraryBuilder.setSanitizerKind(LibraryBuilder::SanitizerKind::ADDRESS);
-      for (auto &function : llvmModule->getFunctionList()) {
-        function.addFnAttr(llvm::Attribute::SanitizeAddress);
+    if (!isRawContainer) {
+      // Default mode: build IREE HAL executable library metadata.
+      LibraryBuilder::Mode libraryBuilderMode =
+          target.debugSymbols ? LibraryBuilder::Mode::INCLUDE_REFLECTION_ATTRS
+                              : LibraryBuilder::Mode::NONE;
+      LibraryBuilder libraryBuilder(llvmModule.get(), libraryBuilderMode,
+                                    LibraryBuilder::Version::LATEST);
+
+      switch (target.sanitizerKind) {
+      case SanitizerKind::kNone: {
+        libraryBuilder.setSanitizerKind(LibraryBuilder::SanitizerKind::NONE);
+        break;
       }
-    } break;
-    case SanitizerKind::kThread: {
-      libraryBuilder.setSanitizerKind(LibraryBuilder::SanitizerKind::THREAD);
-      for (auto &function : llvmModule->getFunctionList()) {
-        function.addFnAttr(llvm::Attribute::SanitizeThread);
-      }
-    } break;
-    }
-
-    // Declare dynamically imported functions.
-    auto importsAttrName =
-        StringAttr::get(variantOp.getContext(), "hal.executable.imports");
-    if (auto importsAttr =
-            variantOp->getAttrOfType<ArrayAttr>(importsAttrName)) {
-      for (auto importAttr : importsAttr.getAsValueRange<ArrayAttr>()) {
-        auto nameAttr = cast<StringAttr>(importAttr[0]);
-        auto weakAttr = cast<BoolAttr>(importAttr[1]);
-        libraryBuilder.addImport(nameAttr.getValue(), weakAttr.getValue());
-      }
-      variantOp->removeAttr(importsAttrName);
-    }
-
-    // Declare exported entry points.
-    auto align16 = llvm::Attribute::getWithAlignment(context, llvm::Align(16));
-    for (auto exportOp : variantOp.getBlock().getOps<ExecutableExportOp>()) {
-      // Find the matching function in the LLVM module.
-      auto *llvmFunc = llvmModule->getFunction(exportOp.getName());
-      if (!llvmFunc) {
-        continue;
-      }
-      llvmFunc->setLinkage(llvm::GlobalValue::LinkageTypes::InternalLinkage);
-      llvmFunc->setDSOLocal(true);
-
-      // Tag the function parameters in case they got removed during conversion.
-      // (%arg0: environment, %arg1: dispatch_state, %arg2: workgroup_state)
-      for (unsigned i = 0; i <= 2; ++i) {
-        llvmFunc->addParamAttr(i, llvm::Attribute::NonNull);
-        llvmFunc->addParamAttr(i, llvm::Attribute::NoAlias);
-        llvmFunc->addParamAttr(i, align16);
-      }
-
-      LibraryBuilder::DispatchAttrs dispatchAttrs = {};
-
-      // Entry points may optionally specify that they require workgroup local
-      // memory. We fetch that value here and plumb it through so the runtime
-      // knows how much memory to reserve and pass in.
-      dispatchAttrs.localMemorySize = exportOp.getWorkgroupLocalMemory()
-                                          .value_or(APInt(64, 0))
-                                          .getSExtValue();
-
-      // Specify the constant and binding information used to validate
-      // dispatches.
-      if (auto layoutAttr = exportOp.getLayout()) {
-        dispatchAttrs.constantCount = layoutAttr.getConstants();
-        dispatchAttrs.bindingCount = layoutAttr.getBindings().size();
-      }
-
-      // Extract workgroup size if specified at compile time.
-      if (auto workgroupSizeAttr = exportOp.getWorkgroupSize()) {
-        auto workgroupSizeValues = workgroupSizeAttr->getValue();
-        dispatchAttrs.workgroupSize[0] = static_cast<uint32_t>(
-            cast<IntegerAttr>(workgroupSizeValues[0]).getInt());
-        dispatchAttrs.workgroupSize[1] = static_cast<uint32_t>(
-            cast<IntegerAttr>(workgroupSizeValues[1]).getInt());
-        dispatchAttrs.workgroupSize[2] = static_cast<uint32_t>(
-            cast<IntegerAttr>(workgroupSizeValues[2]).getInt());
-      }
-
-      LibraryBuilder::SourceLocation sourceLocation;
-      if (options.debugLevel >= 1) {
-        if (auto loc = findFirstFileLoc(exportOp.getLoc())) {
-          sourceLocation = {"", loc->getFilename().str(), loc->getLine()};
+      case SanitizerKind::kAddress: {
+        libraryBuilder.setSanitizerKind(
+            LibraryBuilder::SanitizerKind::ADDRESS);
+        for (auto &function : llvmModule->getFunctionList()) {
+          function.addFnAttr(llvm::Attribute::SanitizeAddress);
         }
+      } break;
+      case SanitizerKind::kThread: {
+        libraryBuilder.setSanitizerKind(
+            LibraryBuilder::SanitizerKind::THREAD);
+        for (auto &function : llvmModule->getFunctionList()) {
+          function.addFnAttr(llvm::Attribute::SanitizeThread);
+        }
+      } break;
       }
-      SmallVector<LibraryBuilder::SourceLocation> stageLocations;
-      if (options.debugLevel >= 3) {
-        if (auto locsAttr = exportOp.getSourceLocsAttr()) {
-          for (auto locAttr : locsAttr.getValue()) {
-            if (auto loc =
-                    findFirstFileLoc(cast<LocationAttr>(locAttr.getValue()))) {
-              stageLocations.push_back({
-                  locAttr.getName().str(),
-                  loc->getFilename().str(),
-                  loc->getLine(),
-              });
+
+      auto importsAttrName =
+          StringAttr::get(variantOp.getContext(), "hal.executable.imports");
+      if (auto importsAttr =
+              variantOp->getAttrOfType<ArrayAttr>(importsAttrName)) {
+        for (auto importAttr : importsAttr.getAsValueRange<ArrayAttr>()) {
+          auto nameAttr = cast<StringAttr>(importAttr[0]);
+          auto weakAttr = cast<BoolAttr>(importAttr[1]);
+          libraryBuilder.addImport(nameAttr.getValue(), weakAttr.getValue());
+        }
+        variantOp->removeAttr(importsAttrName);
+      }
+
+      auto align16 =
+          llvm::Attribute::getWithAlignment(context, llvm::Align(16));
+      for (auto exportOp :
+           variantOp.getBlock().getOps<ExecutableExportOp>()) {
+        auto *llvmFunc = llvmModule->getFunction(exportOp.getName());
+        if (!llvmFunc) {
+          continue;
+        }
+        llvmFunc->setLinkage(
+            llvm::GlobalValue::LinkageTypes::InternalLinkage);
+        llvmFunc->setDSOLocal(true);
+        for (unsigned i = 0; i <= 2; ++i) {
+          llvmFunc->addParamAttr(i, llvm::Attribute::NonNull);
+          llvmFunc->addParamAttr(i, llvm::Attribute::NoAlias);
+          llvmFunc->addParamAttr(i, align16);
+        }
+
+        LibraryBuilder::DispatchAttrs dispatchAttrs = {};
+        dispatchAttrs.localMemorySize = exportOp.getWorkgroupLocalMemory()
+                                            .value_or(APInt(64, 0))
+                                            .getSExtValue();
+        if (auto layoutAttr = exportOp.getLayout()) {
+          dispatchAttrs.constantCount = layoutAttr.getConstants();
+          dispatchAttrs.bindingCount = layoutAttr.getBindings().size();
+        }
+        if (auto workgroupSizeAttr = exportOp.getWorkgroupSize()) {
+          auto workgroupSizeValues = workgroupSizeAttr->getValue();
+          dispatchAttrs.workgroupSize[0] = static_cast<uint32_t>(
+              cast<IntegerAttr>(workgroupSizeValues[0]).getInt());
+          dispatchAttrs.workgroupSize[1] = static_cast<uint32_t>(
+              cast<IntegerAttr>(workgroupSizeValues[1]).getInt());
+          dispatchAttrs.workgroupSize[2] = static_cast<uint32_t>(
+              cast<IntegerAttr>(workgroupSizeValues[2]).getInt());
+        }
+
+        LibraryBuilder::SourceLocation sourceLocation;
+        if (options.debugLevel >= 1) {
+          if (auto loc = findFirstFileLoc(exportOp.getLoc())) {
+            sourceLocation = {"", loc->getFilename().str(), loc->getLine()};
+          }
+        }
+        SmallVector<LibraryBuilder::SourceLocation> stageLocations;
+        if (options.debugLevel >= 3) {
+          if (auto locsAttr = exportOp.getSourceLocsAttr()) {
+            for (auto locAttr : locsAttr.getValue()) {
+              if (auto loc = findFirstFileLoc(
+                      cast<LocationAttr>(locAttr.getValue()))) {
+                stageLocations.push_back({
+                    locAttr.getName().str(),
+                    loc->getFilename().str(),
+                    loc->getLine(),
+                });
+              }
             }
           }
         }
+        libraryBuilder.addExport(exportOp.getName(),
+                                 std::move(sourceLocation),
+                                 std::move(stageLocations), /*tag=*/"",
+                                 dispatchAttrs, llvmFunc);
       }
-      libraryBuilder.addExport(exportOp.getName(), std::move(sourceLocation),
-                               std::move(stageLocations), /*tag=*/"",
-                               dispatchAttrs, llvmFunc);
-    }
 
-    // Embed source files (if present).
-    if (auto sourcesAttr = variantOp.getSourcesAttr()) {
-      for (auto sourceAttr : sourcesAttr.getValue()) {
-        if (auto resourceAttr = dyn_cast_if_present<DenseResourceElementsAttr>(
-                sourceAttr.getValue())) {
-          auto handle = resourceAttr.getRawHandle();
-          SmallVector<char> rawData;
-          llvm::append_range(rawData, handle.getBlob()->getData());
-          libraryBuilder.addSourceFile(sourceAttr.getName(),
-                                       std::move(rawData));
+      if (auto sourcesAttr = variantOp.getSourcesAttr()) {
+        for (auto sourceAttr : sourcesAttr.getValue()) {
+          if (auto resourceAttr =
+                  dyn_cast_if_present<DenseResourceElementsAttr>(
+                      sourceAttr.getValue())) {
+            auto handle = resourceAttr.getRawHandle();
+            SmallVector<char> rawData;
+            llvm::append_range(rawData, handle.getBlob()->getData());
+            libraryBuilder.addSourceFile(sourceAttr.getName(),
+                                         std::move(rawData));
+          }
         }
       }
-    }
 
-    auto queryFunctionName = std::string(kQueryFunctionName);
-    if (target.linkStatic) {
-      // Static library query functions must be unique to support multiple
-      // libraries in the same namespace.
-      queryFunctionName = libraryName + "_library_query";
+      auto queryFunctionName = std::string(kQueryFunctionName);
+      if (target.linkStatic) {
+        queryFunctionName = libraryName + "_library_query";
+      }
+      queryLibraryFunc = libraryBuilder.build(queryFunctionName);
+      queryLibraryFunc->setDSOLocal(false);
+      queryLibraryFunc->setVisibility(
+          llvm::GlobalValue::VisibilityTypes::DefaultVisibility);
+      queryLibraryFunc->setLinkage(
+          llvm::GlobalValue::LinkageTypes::ExternalLinkage);
+      queryLibraryFunc->setDLLStorageClass(
+          llvm::GlobalValue::DLLStorageClassTypes::DLLExportStorageClass);
+    } else {
+      // Raw container mode: export kernel functions directly, no
+      // LibraryBuilder.
+      for (auto exportOp :
+           variantOp.getBlock().getOps<ExecutableExportOp>()) {
+        auto *llvmFunc = llvmModule->getFunction(exportOp.getName());
+        if (!llvmFunc) {
+          continue;
+        }
+        llvmFunc->setLinkage(
+            llvm::GlobalValue::LinkageTypes::ExternalLinkage);
+        llvmFunc->setDSOLocal(false);
+        llvmFunc->setVisibility(
+            llvm::GlobalValue::VisibilityTypes::DefaultVisibility);
+      }
     }
-    auto *queryLibraryFunc = libraryBuilder.build(queryFunctionName);
-
-    // The query function must be exported for dynamic libraries.
-    queryLibraryFunc->setDSOLocal(false);
-    queryLibraryFunc->setVisibility(
-        llvm::GlobalValue::VisibilityTypes::DefaultVisibility);
-    queryLibraryFunc->setLinkage(
-        llvm::GlobalValue::LinkageTypes::ExternalLinkage);
-    queryLibraryFunc->setDLLStorageClass(
-        llvm::GlobalValue::DLLStorageClassTypes::DLLExportStorageClass);
 
     // If linking dynamically, find a suitable linker tool and configure the
     // module with any options that tool requires.
     std::unique_ptr<LinkerTool> linkerTool;
     if (!target.linkStatic) {
-      // Grab a linker tool based on the options (and target environment).
-      // This uses the defaultTargetOptions_ in order to get paths and such,
-      // which are environmental, but replace the target with the actual one.
       LLVMTargetOptions options = defaultTargetOptions_;
       options.target = target;
       linkerTool = LinkerTool::getForTarget(targetTriple, options);
@@ -501,10 +507,12 @@ public:
                << targetTriple.str() << "'";
       }
 
-      // Configure the module with any code generation options required later by
-      // linking (such as initializer functions).
-      if (failed(linkerTool->configureModule(llvmModule.get(),
-                                             {queryLibraryFunc}))) {
+      SmallVector<llvm::Function *> exportedFuncs;
+      if (queryLibraryFunc) {
+        exportedFuncs.push_back(queryLibraryFunc);
+      }
+      if (failed(
+              linkerTool->configureModule(llvmModule.get(), exportedFuncs))) {
         return variantOp.emitError()
                << "failed to configure LLVM module for target linker";
       }
@@ -625,7 +633,16 @@ public:
     // symbol references may still be created past this point, namely to math
     // functions, e.g. `llvm.frem` lowering to a call to `fmodf`.
     SetVector<llvm::Function *> preservedFuncs;
-    preservedFuncs.insert(queryLibraryFunc);
+    if (isRawContainer) {
+      for (auto exportOp :
+           variantOp.getBlock().getOps<ExecutableExportOp>()) {
+        if (auto *f = llvmModule->getFunction(exportOp.getName())) {
+          preservedFuncs.insert(f);
+        }
+      }
+    } else {
+      preservedFuncs.insert(queryLibraryFunc);
+    }
     fixupVisibility(*llvmModule, preservedFuncs);
 
     // Dump bitcode post-linking and optimization.
@@ -705,9 +722,11 @@ public:
     }
 
     if (target.linkStatic) {
+      std::string staticQueryName =
+          isRawContainer ? "" : (libraryName + "_library_query");
       return serializeStaticLibraryExecutable(options, target, variantOp,
                                               executableBuilder, libraryName,
-                                              queryFunctionName, objectFiles);
+                                              staticQueryName, objectFiles);
     } else {
       return serializeDynamicLibraryExecutable(
           options, target, variantOp, executableBuilder, libraryName,

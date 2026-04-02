@@ -146,6 +146,15 @@ private:
   friend struct LLVMCPUTargetCLOptions;
 };
 
+// Container type for serialized executables.
+enum class LLVMCPUContainerType {
+  // Default: use LibraryBuilder + IREE executable library ABI.
+  Default,
+  // Raw: skip LibraryBuilder, export kernel functions directly with flat ABI.
+  // Intended for standalone launchers that don't use the IREE runtime.
+  Raw,
+};
+
 struct LLVMTargetOptions {
   // Default target machine configuration.
   LLVMTarget target;
@@ -163,6 +172,9 @@ struct LLVMTargetOptions {
 
   // True to keep linker artifacts for debugging.
   bool keepLinkerArtifacts = false;
+
+  // Container type for serialized executables.
+  LLVMCPUContainerType containerType = LLVMCPUContainerType::Default;
 };
 
 // Creates target machine form target options.
@@ -200,6 +212,7 @@ struct LLVMCPUTargetCLOptions {
       LLVMTarget::DEFAULT_MAX_STACK_ALLOC_SIZE_IN_BYTES;
   std::string enableUkernels = LLVMTarget::DEFAULT_ENABLE_UKERNELS;
   bool linkUKernelBitcode = LLVMTarget::DEFAULT_LINK_UKERNEL_BITCODE;
+  LLVMCPUContainerType containerType = LLVMCPUContainerType::Default;
   bool listTargets; // Ignored - used with llvm::cl::ValueDisallowed.
 
   void bindOptions(OptionsBinder &binder);
