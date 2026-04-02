@@ -31,12 +31,20 @@
 
 namespace mlir::iree_compiler::IREE::HAL {
 namespace {
+enum class VulkanContainerType {
+  // Default: FlatBuffer wrapping SPIR-V + pipeline/descriptor layout metadata.
+  Default,
+  // Raw SPIR-V binary (just the SPIR-V module bytes, no wrapper).
+  SPIRV,
+};
+
 struct VulkanSPIRVTargetOptions {
   // Use vp_android_baseline_2022 profile as the default target--it's a good
   // lowest common denominator to guarantee the generated SPIR-V is widely
   // accepted for now. Eventually we want to use a list for multi-targeting.
   std::string target = "vp_android_baseline_2022";
   bool indirectBindings = false;
+  VulkanContainerType containerType = VulkanContainerType::Default;
 
   void bindOptions(OptionsBinder &binder) {
     static llvm::cl::OptionCategory category("VulkanSPIRV HAL Target");
@@ -56,6 +64,15 @@ struct VulkanSPIRVTargetOptions {
         "iree-vulkan-experimental-indirect-bindings", indirectBindings,
         llvm::cl::desc(
             "Force indirect bindings for all generated dispatches."));
+    binder.opt<VulkanContainerType>(
+        "iree-vulkan-container-type", containerType,
+        llvm::cl::cat(category),
+        llvm::cl::desc("Serialized executable container type."),
+        llvm::cl::values(
+            clEnumValN(VulkanContainerType::Default, "default",
+                       "FlatBuffer with SPIR-V + pipeline layout metadata."),
+            clEnumValN(VulkanContainerType::SPIRV, "spirv",
+                       "Raw SPIR-V binary (no wrapper).")));
   }
 };
 
@@ -280,6 +297,36 @@ public:
         exportOps[ordinal] =
             std::make_tuple(exportOp, spirvModuleOp, spirvEntryPointOp);
       }
+    }
+
+    // Raw SPIR-V mode: serialize just the first SPIR-V module and store
+    // directly without FlatBuffer wrapping.
+    if (options_.containerType == VulkanContainerType::SPIRV) {
+      auto [exportOp, spirvModuleOp, spirvEntryPointOp] = exportOps[0];
+      SmallVector<uint32_t, 0> spirvBinary;
+      if (failed(spirv::serialize(spirvModuleOp, spirvBinary)) ||
+          spirvBinary.empty()) {
+        return spirvModuleOp.emitError() << "failed to serialize";
+      }
+      if (!options.dumpBinariesPath.empty()) {
+        dumpDataToPath<uint32_t>(options.dumpBinariesPath, options.dumpBaseName,
+                                 spirvEntryPointOp.getFn(), ".spv",
+                                 spirvBinary);
+      }
+      // Store raw SPIR-V bytes as uint8_t.
+      auto bufferAttr = DenseIntElementsAttr::get(
+          VectorType::get(
+              {static_cast<int64_t>(spirvBinary.size() * sizeof(uint32_t))},
+              IntegerType::get(executableBuilder.getContext(), 8)),
+          ArrayRef<uint8_t>(
+              reinterpret_cast<const uint8_t *>(spirvBinary.data()),
+              spirvBinary.size() * sizeof(uint32_t)));
+      auto binaryOp = IREE::HAL::ExecutableBinaryOp::create(
+          executableBuilder, variantOp.getLoc(), variantOp.getSymName(),
+          variantOp.getTarget().getFormat(), bufferAttr);
+      binaryOp.setMimeTypeAttr(
+          executableBuilder.getStringAttr("application/x-spirv"));
+      return success();
     }
 
     FlatbufferBuilder builder;

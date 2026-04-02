@@ -373,7 +373,9 @@ int ireeDeviceCodegenRunMain(int argc, char **argv) {
   {
     bool hasROCMContainerType = false;
     bool hasLLVMCPUContainerType = false;
+    bool hasVulkanContainerType = false;
     bool isLLVMCPUBackend = false;
+    bool isVulkanBackend = false;
     bool isNonROCMBackend = false;
     for (int i = 1; i < argc; ++i) {
       if (strncmp(argv[i], "--iree-rocm-container-type", 26) == 0) {
@@ -382,9 +384,15 @@ int ireeDeviceCodegenRunMain(int argc, char **argv) {
       if (strncmp(argv[i], "--iree-llvmcpu-container-type", 29) == 0) {
         hasLLVMCPUContainerType = true;
       }
+      if (strncmp(argv[i], "--iree-vulkan-container-type", 28) == 0) {
+        hasVulkanContainerType = true;
+      }
       if (strncmp(argv[i], "--iree-hal-target-backends=", 27) == 0) {
         if (strstr(argv[i], "llvm-cpu") != nullptr) {
           isLLVMCPUBackend = true;
+        }
+        if (strstr(argv[i], "vulkan-spirv") != nullptr) {
+          isVulkanBackend = true;
         }
         if (strstr(argv[i], "rocm") == nullptr) {
           isNonROCMBackend = true;
@@ -399,6 +407,10 @@ int ireeDeviceCodegenRunMain(int argc, char **argv) {
     if (isLLVMCPUBackend && !hasLLVMCPUContainerType) {
       augArgv.push_back("--iree-llvmcpu-container-type=raw");
       augArgv.push_back("--iree-llvmcpu-link-embedded=false");
+    }
+    // Vulkan: force raw SPIR-V output (not FlatBuffer).
+    if (isVulkanBackend && !hasVulkanContainerType) {
+      augArgv.push_back("--iree-vulkan-container-type=spirv");
     }
   }
   int augArgc = augArgv.size();

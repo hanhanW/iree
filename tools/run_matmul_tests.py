@@ -119,6 +119,15 @@ def compile_test(mlir_path, build_dir, target, work_dir, backend="rocm"):
             mlir_path,
         ]
         kernel_file = "kernel.so"
+    elif backend == "vulkan-spirv":
+        cmd = [
+            device_codegen,
+            f"--iree-hal-target-backends=vulkan-spirv",
+            f"--iree-vulkan-target={target}",
+            f"--output-dir={work_dir}",
+            mlir_path,
+        ]
+        kernel_file = "kernel.spv"
     else:
         cmd = [
             device_codegen,
@@ -187,8 +196,9 @@ def main():
     parser.add_argument("--target", default="gfx1100",
                         help="Target chip (e.g., gfx1100) or CPU (e.g., host)")
     parser.add_argument("--backend", default="rocm",
-                        choices=["rocm", "llvm-cpu"],
-                        help="Backend: rocm (GPU) or llvm-cpu (CPU)")
+                        choices=["rocm", "llvm-cpu", "vulkan-spirv"],
+                        help="Backend: rocm (GPU), llvm-cpu (CPU), or "
+                             "vulkan-spirv (Vulkan SPIR-V)")
     parser.add_argument(
         "--compile-only",
         action="store_true",
