@@ -144,3 +144,35 @@ func.func @dont_reassociate(%arg0 : tensor<4096xi32>, %arg1 : tensor<f32>) -> te
 //       DISABLEREASSOC:   %[[GENERIC:.+]] = linalg.generic
 //  DISABLEREASSOC-SAME:       iterator_types = ["reduction"]
 //       DISABLEREASSOC:   return %[[GENERIC]]
+
+// -----
+
+// Bounded dynamic reduction: the dynamic dim has a known upper bound (128)
+// that is a multiple of the split size (16), so split reduction should fire.
+#config2 = #iree_cpu.lowering_config<vector_reduction = [16]>
+#map2 = affine_map<(d0) -> (d0)>
+#map3 = affine_map<(d0) -> ()>
+func.func @bounded_dynamic_reduction(%arg0: tensor<128xf32>, %arg1: tensor<f32>, %idx: index) -> tensor<f32> {
+  %size = affine.min affine_map<(d0) -> (128, -d0 + 256)>(%idx)
+  %slice = tensor.extract_slice %arg0[0] [%size] [1] : tensor<128xf32> to tensor<?xf32>
+  %0 = linalg.generic {
+      indexing_maps = [#map2, #map3],
+      iterator_types = ["reduction"]}
+    ins(%slice : tensor<?xf32>) outs(%arg1 : tensor<f32>)
+    attrs = {lowering_config = #config2} {
+  ^bb0(%in: f32, %out: f32):
+    %add = arith.addf %in, %out : f32
+    linalg.yield %add : f32
+  } -> tensor<f32>
+  return %0 : tensor<f32>
+}
+// CHECK-LABEL: func @bounded_dynamic_reduction
+//       CHECK:   tensor.expand_shape {{.*}} into tensor<?x16xf32>
+//       CHECK:   tensor.empty() : tensor<16xf32>
+//       CHECK:   linalg.fill
+//       CHECK:   scf.for
+//       CHECK:     linalg.generic
+//  CHECK-SAME:       iterator_types = ["reduction", "parallel"]
+//       CHECK:     scf.yield
+//       CHECK:   linalg.generic
+//  CHECK-SAME:     iterator_types = ["reduction"]
