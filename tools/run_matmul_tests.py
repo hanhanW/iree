@@ -222,6 +222,8 @@ def main():
     # Check for runner binary.
     if args.backend == "llvm-cpu":
         runner_bin = os.path.join(args.build_dir, "tools", "run-cpu-kernel")
+    elif args.backend == "vulkan-spirv":
+        runner_bin = os.path.join(args.build_dir, "tools", "run-vulkan-kernel")
     else:
         runner_bin = os.path.join(args.build_dir, "tools", "run-hip-kernel")
     has_runner = os.path.exists(runner_bin) and not args.compile_only
